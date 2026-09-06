@@ -118,8 +118,6 @@ fun DLCalcApp() {
       onSpeedChange = viewModel::onSpeedChange,
       onSpeedUnitChange = viewModel::onSpeedUnitChange,
       onSetSpeedDropdownExpanded = viewModel::setSpeedDropdownExpanded,
-      onClearFileSize = viewModel::clearFileSize,
-      onClearSpeed = viewModel::clearSpeed,
       onClearAll = viewModel::clearAll,
       onToggleDarkMode = viewModel::toggleDarkMode,
       modifier = Modifier.padding(innerPadding)
@@ -137,8 +135,6 @@ fun DLCalcScreen(
   onSpeedChange: (String) -> Unit = {},
   onSpeedUnitChange: (SpeedUnit) -> Unit = {},
   onSetSpeedDropdownExpanded: (Boolean) -> Unit = {},
-  onClearFileSize: () -> Unit = {},
-  onClearSpeed: () -> Unit = {},
   onClearAll: () -> Unit = {},
   onToggleDarkMode: () -> Unit = {},
   modifier: Modifier = Modifier
@@ -153,11 +149,15 @@ fun DLCalcScreen(
 
   fun copyToClipboard(text: String, label: String) {
     if (text.isEmpty()) return
-    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-    val clip = ClipData.newPlainText(label, text)
-    clipboard?.setPrimaryClip(clip)
-    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-    Toast.makeText(context, "Copied: $text", Toast.LENGTH_SHORT).show()
+    try {
+      val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+      val clip = ClipData.newPlainText(label, text)
+      clipboard?.setPrimaryClip(clip)
+      haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+      Toast.makeText(context, "Copied: $text", Toast.LENGTH_SHORT).show()
+    } catch (e: Exception) {
+      // Prevent crash if clipboard service is restricted or unavailable
+    }
   }
 
   Box(
@@ -359,8 +359,8 @@ fun DLCalcScreen(
 
       Spacer(modifier = Modifier.height(24.dp))
 
-      // 3. File size row: File size: _____ GB v [x]
-      // Standardized layout with matching slot widths for perfect vertical alignment of inputs, dropdowns, and X buttons
+      // 3. File size row: File size: _____ GB v
+      // Standardized layout with matching slot widths for perfect vertical alignment of inputs and dropdowns
       Row(
         modifier = Modifier
           .fillMaxWidth()
@@ -461,34 +461,12 @@ fun DLCalcScreen(
             }
           }
         }
-
-        Spacer(modifier = Modifier.width(8.dp))
-
-        // Red X button to clear value (static fixed size square with rounded corners: 28.dp)
-        Box(
-          modifier = Modifier
-            .size(28.dp)
-            .background(ClearRedColor, RoundedCornerShape(4.dp))
-            .clickable { onClearFileSize() }
-            .testTag("clear_file_size_button"),
-          contentAlignment = Alignment.Center
-        ) {
-          Text(
-            text = "X",
-            style = TextStyle(
-              fontSize = 17.sp,
-              fontWeight = FontWeight.Bold,
-              color = Color.White,
-              lineHeight = 17.sp
-            )
-          )
-        }
       }
 
       Spacer(modifier = Modifier.height(14.dp))
 
-      // 4. Speed row: Speed: _____ Mbps v [x]
-      // Perfectly aligned with File size row (Label 96dp, Input 95dp, Spacer 10dp, Unit 85dp, Spacer 8dp, X button 28dp)
+      // 4. Speed row: Speed: _____ Mbps v
+      // Perfectly aligned with File size row (Label 96dp, Input 95dp, Spacer 10dp, Unit 85dp)
       Row(
         modifier = Modifier
           .fillMaxWidth()
@@ -591,28 +569,6 @@ fun DLCalcScreen(
               )
             }
           }
-        }
-
-        Spacer(modifier = Modifier.width(8.dp))
-
-        // Red X button to clear value (static fixed size square with rounded corners: 28.dp)
-        Box(
-          modifier = Modifier
-            .size(28.dp)
-            .background(ClearRedColor, RoundedCornerShape(4.dp))
-            .clickable { onClearSpeed() }
-            .testTag("clear_speed_button"),
-          contentAlignment = Alignment.Center
-        ) {
-          Text(
-            text = "X",
-            style = TextStyle(
-              fontSize = 17.sp,
-              fontWeight = FontWeight.Bold,
-              color = Color.White,
-              lineHeight = 17.sp
-            )
-          )
         }
       }
 

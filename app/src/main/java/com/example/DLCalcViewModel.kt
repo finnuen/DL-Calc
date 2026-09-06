@@ -8,8 +8,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -32,7 +32,7 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
 
     // Cached and reactive calculation derived flow to prevent UI recomposition recalculations
     val calculationResult: StateFlow<DownloadTimeResult> = _uiState
-        .combine(_uiState) { state, _ ->
+        .map { state ->
             DownloadCalculator.calculate(
                 state.fileSize,
                 state.fileSizeUnit,
@@ -47,17 +47,21 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
 
     init {
         viewModelScope.launch {
-            val savedState = repository.calcState.firstOrNull()
-            if (savedState != null) {
-                _uiState.value = _uiState.value.copy(
-                    fileSize = savedState.fileSize,
-                    fileSizeUnit = FileSizeUnit.fromLabel(savedState.fileSizeUnit),
-                    speed = savedState.speed,
-                    speedUnit = SpeedUnit.fromLabel(savedState.speedUnit),
-                    isDarkMode = savedState.isDarkMode,
-                    isInitialized = true
-                )
-            } else {
+            try {
+                val savedState = repository.calcState.firstOrNull()
+                if (savedState != null) {
+                    _uiState.value = _uiState.value.copy(
+                        fileSize = savedState.fileSize,
+                        fileSizeUnit = FileSizeUnit.fromLabel(savedState.fileSizeUnit),
+                        speed = savedState.speed,
+                        speedUnit = SpeedUnit.fromLabel(savedState.speedUnit),
+                        isDarkMode = savedState.isDarkMode,
+                        isInitialized = true
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(isInitialized = true)
+                }
+            } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(isInitialized = true)
             }
         }
@@ -65,13 +69,17 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
 
     private fun persistCurrentState(state: DLCalcUiState) {
         viewModelScope.launch {
-            repository.saveState(
-                fileSize = state.fileSize,
-                fileSizeUnit = state.fileSizeUnit.label,
-                speed = state.speed,
-                speedUnit = state.speedUnit.label,
-                isDarkMode = state.isDarkMode
-            )
+            try {
+                repository.saveState(
+                    fileSize = state.fileSize,
+                    fileSizeUnit = state.fileSizeUnit.label,
+                    speed = state.speed,
+                    speedUnit = state.speedUnit.label,
+                    isDarkMode = state.isDarkMode
+                )
+            } catch (e: Exception) {
+                // Ignore failure to persist to prevent crashing
+            }
         }
     }
 

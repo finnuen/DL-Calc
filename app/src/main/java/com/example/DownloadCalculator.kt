@@ -100,6 +100,9 @@ object DownloadCalculator {
         if (bytesPerSec <= 0.0) return DownloadTimeResult(hasResult = false)
 
         val totalSecondsExact = totalBytes / bytesPerSec
+        if (totalSecondsExact.isNaN() || totalSecondsExact.isInfinite() || totalSecondsExact <= 0.0) {
+            return DownloadTimeResult(hasResult = false)
+        }
 
         // Requirement 2: "when below 1 second show '1<' in seconds"
         if (totalSecondsExact < 1.0) {
@@ -115,7 +118,13 @@ object DownloadCalculator {
             )
         }
 
-        val totalSeconds = Math.round(totalSecondsExact)
+        // Cap at 100,000 years to prevent numeric overflow
+        val maxSafeSeconds = 3_153_600_000_000L
+        val totalSeconds = if (totalSecondsExact >= maxSafeSeconds) {
+            maxSafeSeconds
+        } else {
+            Math.round(totalSecondsExact)
+        }
 
         val days = totalSeconds / 86400
         val remAfterDays = totalSeconds % 86400
@@ -124,8 +133,12 @@ object DownloadCalculator {
         val minutes = remAfterHours / 60
         val seconds = remAfterHours % 60
 
-        val formattedSeconds = synchronized(numberFormatter) {
-            numberFormatter.format(totalSeconds)
+        val formattedSeconds = try {
+            synchronized(numberFormatter) {
+                numberFormatter.format(totalSeconds)
+            }
+        } catch (e: Exception) {
+            totalSeconds.toString()
         }
 
         return DownloadTimeResult(
