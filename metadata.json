@@ -1,0 +1,6 @@
+{
+  "name": "DL Calc",
+  "description": "Download time calculator based on file size and connection speed.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
