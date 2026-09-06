@@ -41,10 +41,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -66,6 +65,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.data.AppDatabase
+import com.example.data.CalcStateRepository
 import com.example.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
@@ -91,18 +93,35 @@ private val DarkUnderlineColor = Color(0xFFE2E8F0)
 
 @Composable
 fun DLCalcApp() {
-  // Requirement 2: make dark mode as default
-  var isDarkMode by remember { mutableStateOf(true) }
+  val context = LocalContext.current
+  val database = remember { AppDatabase.getDatabase(context) }
+  val repository = remember { CalcStateRepository(database.calcStateDao()) }
+  val viewModel: DLCalcViewModel = viewModel(
+    factory = DLCalcViewModel.provideFactory(repository)
+  )
+
+  val uiState by viewModel.uiState.collectAsState()
+  val result by viewModel.calculationResult.collectAsState()
 
   Scaffold(
     modifier = Modifier
       .fillMaxSize()
       .windowInsetsPadding(WindowInsets.safeDrawing),
-    containerColor = if (isDarkMode) DarkBgColor else LightBgColor
+    containerColor = if (uiState.isDarkMode) DarkBgColor else LightBgColor
   ) { innerPadding ->
     DLCalcScreen(
-      isDarkMode = isDarkMode,
-      onToggleDarkMode = { isDarkMode = !isDarkMode },
+      uiState = uiState,
+      result = result,
+      onFileSizeChange = viewModel::onFileSizeChange,
+      onFileSizeUnitChange = viewModel::onFileSizeUnitChange,
+      onSetFileSizeDropdownExpanded = viewModel::setFileSizeDropdownExpanded,
+      onSpeedChange = viewModel::onSpeedChange,
+      onSpeedUnitChange = viewModel::onSpeedUnitChange,
+      onSetSpeedDropdownExpanded = viewModel::setSpeedDropdownExpanded,
+      onClearFileSize = viewModel::clearFileSize,
+      onClearSpeed = viewModel::clearSpeed,
+      onClearAll = viewModel::clearAll,
+      onToggleDarkMode = viewModel::toggleDarkMode,
       modifier = Modifier.padding(innerPadding)
     )
   }
@@ -110,7 +129,17 @@ fun DLCalcApp() {
 
 @Composable
 fun DLCalcScreen(
-  isDarkMode: Boolean = true,
+  uiState: DLCalcUiState = DLCalcUiState(),
+  result: DownloadTimeResult = DownloadTimeResult(hasResult = false),
+  onFileSizeChange: (String) -> Unit = {},
+  onFileSizeUnitChange: (FileSizeUnit) -> Unit = {},
+  onSetFileSizeDropdownExpanded: (Boolean) -> Unit = {},
+  onSpeedChange: (String) -> Unit = {},
+  onSpeedUnitChange: (SpeedUnit) -> Unit = {},
+  onSetSpeedDropdownExpanded: (Boolean) -> Unit = {},
+  onClearFileSize: () -> Unit = {},
+  onClearSpeed: () -> Unit = {},
+  onClearAll: () -> Unit = {},
   onToggleDarkMode: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
@@ -118,21 +147,9 @@ fun DLCalcScreen(
   val haptic = LocalHapticFeedback.current
   val focusManager = LocalFocusManager.current
 
-  var fileSize by remember { mutableStateOf("") }
-  var fileSizeUnit by remember { mutableStateOf(FileSizeUnit.GB) }
-  var isFileSizeDropdownExpanded by remember { mutableStateOf(false) }
-
-  var speed by remember { mutableStateOf("") }
-  var speedUnit by remember { mutableStateOf(SpeedUnit.MBPS) }
-  var isSpeedDropdownExpanded by remember { mutableStateOf(false) }
-
-  val result = remember(fileSize, fileSizeUnit, speed, speedUnit) {
-    DownloadCalculator.calculate(fileSize, fileSizeUnit, speed, speedUnit)
-  }
-
-  val textColor = if (isDarkMode) DarkTextColor else LightTextColor
-  val underlineColor = if (isDarkMode) DarkUnderlineColor else LightUnderlineColor
-  val backgroundColor = if (isDarkMode) DarkBgColor else LightBgColor
+  val textColor = if (uiState.isDarkMode) DarkTextColor else LightTextColor
+  val underlineColor = if (uiState.isDarkMode) DarkUnderlineColor else LightUnderlineColor
+  val backgroundColor = if (uiState.isDarkMode) DarkBgColor else LightBgColor
 
   fun copyToClipboard(text: String, label: String) {
     if (text.isEmpty()) return
@@ -380,13 +397,8 @@ fun DLCalcScreen(
           contentAlignment = Alignment.Center
         ) {
           BasicTextField(
-            value = fileSize,
-            onValueChange = { newValue ->
-              // Accepts dot and comma for decimal numbers: e.g. "1.5" or "1,5"
-              if (newValue.isEmpty() || newValue.matches(Regex("""^\d*([.,]\d*)?$"""))) {
-                fileSize = newValue
-              }
-            },
+            value = uiState.fileSize,
+            onValueChange = onFileSizeChange,
             singleLine = true,
             textStyle = TextStyle(
               fontSize = 19.sp,
@@ -414,13 +426,13 @@ fun DLCalcScreen(
               .fillMaxWidth()
               .height(40.dp)
               .testTag("file_size_unit_dropdown")
-              .clickable { isFileSizeDropdownExpanded = true }
+              .clickable { onSetFileSizeDropdownExpanded(true) }
               .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
           ) {
             Text(
-              text = fileSizeUnit.label,
+              text = uiState.fileSizeUnit.label,
               style = TextStyle(
                 fontSize = 19.sp,
                 fontWeight = FontWeight.Medium,
@@ -436,15 +448,14 @@ fun DLCalcScreen(
           }
 
           DropdownMenu(
-            expanded = isFileSizeDropdownExpanded,
-            onDismissRequest = { isFileSizeDropdownExpanded = false }
+            expanded = uiState.isFileSizeDropdownExpanded,
+            onDismissRequest = { onSetFileSizeDropdownExpanded(false) }
           ) {
             FileSizeUnit.entries.forEach { unit ->
               DropdownMenuItem(
                 text = { Text(unit.label, fontWeight = FontWeight.Medium) },
                 onClick = {
-                  fileSizeUnit = unit
-                  isFileSizeDropdownExpanded = false
+                  onFileSizeUnitChange(unit)
                 }
               )
             }
@@ -458,7 +469,7 @@ fun DLCalcScreen(
           modifier = Modifier
             .size(28.dp)
             .background(ClearRedColor, RoundedCornerShape(4.dp))
-            .clickable { fileSize = "" }
+            .clickable { onClearFileSize() }
             .testTag("clear_file_size_button"),
           contentAlignment = Alignment.Center
         ) {
@@ -514,13 +525,8 @@ fun DLCalcScreen(
           contentAlignment = Alignment.Center
         ) {
           BasicTextField(
-            value = speed,
-            onValueChange = { newValue ->
-              // Accepts dot and comma for decimal numbers: e.g. "1.5" or "1,5"
-              if (newValue.isEmpty() || newValue.matches(Regex("""^\d*([.,]\d*)?$"""))) {
-                speed = newValue
-              }
-            },
+            value = uiState.speed,
+            onValueChange = onSpeedChange,
             singleLine = true,
             textStyle = TextStyle(
               fontSize = 19.sp,
@@ -551,13 +557,13 @@ fun DLCalcScreen(
               .fillMaxWidth()
               .height(40.dp)
               .testTag("speed_unit_dropdown")
-              .clickable { isSpeedDropdownExpanded = true }
+              .clickable { onSetSpeedDropdownExpanded(true) }
               .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
           ) {
             Text(
-              text = speedUnit.label,
+              text = uiState.speedUnit.label,
               style = TextStyle(
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Medium,
@@ -573,15 +579,14 @@ fun DLCalcScreen(
           }
 
           DropdownMenu(
-            expanded = isSpeedDropdownExpanded,
-            onDismissRequest = { isSpeedDropdownExpanded = false }
+            expanded = uiState.isSpeedDropdownExpanded,
+            onDismissRequest = { onSetSpeedDropdownExpanded(false) }
           ) {
             SpeedUnit.entries.forEach { unit ->
               DropdownMenuItem(
                 text = { Text(unit.label, fontWeight = FontWeight.Medium) },
                 onClick = {
-                  speedUnit = unit
-                  isSpeedDropdownExpanded = false
+                  onSpeedUnitChange(unit)
                 }
               )
             }
@@ -595,7 +600,7 @@ fun DLCalcScreen(
           modifier = Modifier
             .size(28.dp)
             .background(ClearRedColor, RoundedCornerShape(4.dp))
-            .clickable { speed = "" }
+            .clickable { onClearSpeed() }
             .testTag("clear_speed_button"),
           contentAlignment = Alignment.Center
         ) {
@@ -625,8 +630,8 @@ fun DLCalcScreen(
         Button(
           onClick = onToggleDarkMode,
           colors = ButtonDefaults.buttonColors(
-            containerColor = if (isDarkMode) Color.White else Color.Black,
-            contentColor = if (isDarkMode) Color.Black else Color.White
+            containerColor = if (uiState.isDarkMode) Color.White else Color.Black,
+            contentColor = if (uiState.isDarkMode) Color.Black else Color.White
           ),
           shape = RoundedCornerShape(12.dp),
           modifier = Modifier
@@ -635,11 +640,11 @@ fun DLCalcScreen(
             .testTag("mode_toggle_button")
         ) {
           Text(
-            text = if (isDarkMode) "Dark" else "Light",
+            text = if (uiState.isDarkMode) "Dark" else "Light",
             style = TextStyle(
               fontSize = 19.sp,
               fontWeight = FontWeight.Bold,
-              color = if (isDarkMode) Color.Black else Color.White
+              color = if (uiState.isDarkMode) Color.Black else Color.White
             )
           )
         }
@@ -649,8 +654,7 @@ fun DLCalcScreen(
         // Clear all button (red rounded box with white text "Clear all")
         Button(
           onClick = {
-            fileSize = ""
-            speed = ""
+            onClearAll()
             focusManager.clearFocus()
           },
           colors = ButtonDefaults.buttonColors(
@@ -718,7 +722,7 @@ private fun TimeBreakdownRow(
 @Composable
 fun DLCalcScreenLightPreview() {
   MyApplicationTheme {
-    DLCalcScreen(isDarkMode = false)
+    DLCalcScreen(uiState = DLCalcUiState(isDarkMode = false))
   }
 }
 
@@ -726,6 +730,6 @@ fun DLCalcScreenLightPreview() {
 @Composable
 fun DLCalcScreenDarkPreview() {
   MyApplicationTheme {
-    DLCalcScreen(isDarkMode = true)
+    DLCalcScreen(uiState = DLCalcUiState(isDarkMode = true))
   }
 }

@@ -70,15 +70,22 @@ data class DownloadTimeResult(
 }
 
 object DownloadCalculator {
+    // Reuse NumberFormat instance to avoid frequent allocations on keystrokes
+    private val numberFormatter: NumberFormat = NumberFormat.getNumberInstance(Locale.US)
+
     fun calculate(
         fileSizeStr: String,
         fileUnit: FileSizeUnit,
         speedStr: String,
         speedUnit: SpeedUnit
     ): DownloadTimeResult {
+        if (fileSizeStr.isEmpty() || speedStr.isEmpty()) {
+            return DownloadTimeResult(hasResult = false)
+        }
+
         // Requirement 5: "for decimal, accept dot and comma"
-        val cleanSizeStr = fileSizeStr.trim().replace(",", ".")
-        val cleanSpeedStr = speedStr.trim().replace(",", ".")
+        val cleanSizeStr = fileSizeStr.trim().replace(',', '.')
+        val cleanSpeedStr = speedStr.trim().replace(',', '.')
 
         val size = cleanSizeStr.toDoubleOrNull() ?: return DownloadTimeResult(hasResult = false)
         val speed = cleanSpeedStr.toDoubleOrNull() ?: return DownloadTimeResult(hasResult = false)
@@ -117,7 +124,9 @@ object DownloadCalculator {
         val minutes = remAfterHours / 60
         val seconds = remAfterHours % 60
 
-        val formattedSeconds = NumberFormat.getNumberInstance(Locale.US).format(totalSeconds)
+        val formattedSeconds = synchronized(numberFormatter) {
+            numberFormatter.format(totalSeconds)
+        }
 
         return DownloadTimeResult(
             hasResult = true,
