@@ -714,11 +714,6 @@ private fun TimeBreakdownRow(
   }
 }
 
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-  DLCalcApp()
-}
-
 @Preview(showBackground = true)
 @Composable
 fun DLCalcScreenLightPreview() {
