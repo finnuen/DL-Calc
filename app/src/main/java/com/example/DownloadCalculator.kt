@@ -1,5 +1,7 @@
 package com.example
 
+import java.text.DecimalFormat
+import java.text.DecimalFormatSymbols
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -82,18 +84,22 @@ data class DownloadTimeResult(
 }
 
 object DownloadCalculator {
-    // Reuse NumberFormat instance to avoid frequent allocations on keystrokes
-    private val numberFormatter: NumberFormat = NumberFormat.getNumberInstance(Locale.US)
+    // ThreadLocal formatters to prevent thread contention and eliminate object allocation per calculation
+    private val numberFormatter = ThreadLocal.withInitial {
+        NumberFormat.getNumberInstance(Locale.US)
+    }
+    private val decimalFormatNormal = ThreadLocal.withInitial {
+        DecimalFormat("#,##0.##", DecimalFormatSymbols(Locale.US))
+    }
+    private val decimalFormatSmall = ThreadLocal.withInitial {
+        DecimalFormat("#,##0.####", DecimalFormatSymbols(Locale.US))
+    }
 
     private fun formatDecimal(value: Double): String {
         if (value.isNaN() || value.isInfinite() || value < 0.0) return ""
         if (value == 0.0) return "0"
-        val df = if (value < 0.01) {
-            java.text.DecimalFormat("#,##0.####", java.text.DecimalFormatSymbols(Locale.US))
-        } else {
-            java.text.DecimalFormat("#,##0.##", java.text.DecimalFormatSymbols(Locale.US))
-        }
-        return df.format(value)
+        val df = if (value < 0.01) decimalFormatSmall.get() else decimalFormatNormal.get()
+        return df?.format(value) ?: value.toString()
     }
 
     fun determineBestSpeedUnit(bytesPerSec: Double, preferredUnit: SpeedUnit): Pair<Double, SpeedUnit> {
@@ -159,9 +165,7 @@ object DownloadCalculator {
         val minutes = remAfterHours / 60
         val seconds = remAfterHours % 60
         val formattedSeconds = try {
-            synchronized(numberFormatter) {
-                numberFormatter.format(totalSeconds)
-            }
+            numberFormatter.get()?.format(totalSeconds) ?: totalSeconds.toString()
         } catch (e: Exception) {
             totalSeconds.toString()
         }
@@ -177,6 +181,29 @@ object DownloadCalculator {
         )
     }
 
+    fun formatWithCommas(value: Long): String {
+        if (value < 1000L) return value.toString()
+        return try {
+            numberFormatter.get()?.format(value) ?: value.toString()
+        } catch (e: Exception) {
+            value.toString()
+        }
+    }
+
+    private fun cleanNumericString(str: String): String {
+        val trimmed = str.trim()
+        if (!trimmed.contains(',')) return trimmed
+        val commaIndex = trimmed.indexOf(',')
+        val isThousandsComma = trimmed.count { it == ',' } > 1 ||
+            trimmed.contains('.') ||
+            (trimmed.length - 1 - commaIndex == 3 && commaIndex > 0)
+        return if (isThousandsComma) {
+            trimmed.replace(",", "")
+        } else {
+            trimmed.replace(',', '.')
+        }
+    }
+
     fun calculate(
         fileSizeStr: String,
         fileUnit: FileSizeUnit,
@@ -185,9 +212,9 @@ object DownloadCalculator {
         timeStr: String = "",
         mode: CalcMode = CalcMode.TIME
     ): DownloadTimeResult {
-        val cleanSizeStr = fileSizeStr.trim().replace(',', '.')
-        val cleanSpeedStr = speedStr.trim().replace(',', '.')
-        val cleanTimeStr = timeStr.trim().replace(',', '.')
+        val cleanSizeStr = cleanNumericString(fileSizeStr)
+        val cleanSpeedStr = cleanNumericString(speedStr)
+        val cleanTimeStr = cleanNumericString(timeStr)
 
         when (mode) {
             CalcMode.TIME -> {

@@ -102,4 +102,20 @@ class DLCalcViewModelTest {
         assertEquals(CalcMode.SIZE, viewModel.uiState.value.calcMode)
         assertEquals("7200", viewModel.uiState.value.timeSeconds)
     }
+
+    @Test
+    fun testNumbersOverThousandWithCommas() = runTest {
+        // Entering or pasting formatted numbers strips commas so raw values are stored
+        viewModel.onFileSizeChange("1,000")
+        assertEquals("1000", viewModel.uiState.value.fileSize)
+
+        viewModel.onSpeedChange("10,000")
+        assertEquals("10000", viewModel.uiState.value.speed)
+
+        viewModel.onTimeSecondsChange("1,000")
+        assertEquals("1000", viewModel.uiState.value.timeSeconds)
+
+        viewModel.onDaysChange("1,000")
+        assertEquals("1000", viewModel.uiState.value.days)
+    }
 }

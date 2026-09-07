@@ -219,4 +219,17 @@ class DownloadCalculatorTest {
         assertEquals(FileSizeUnit.GB, bestUnit3)
         assertEquals(512.0, sizeExact3, 0.001)
     }
+
+    @Test
+    fun testInputsWithThousandCommas() {
+        // 1,000 MB at 100 Mbps
+        val result1 = DownloadCalculator.calculate("1,000", FileSizeUnit.MB, "100", SpeedUnit.MBPS)
+        val result2 = DownloadCalculator.calculate("1000", FileSizeUnit.MB, "100", SpeedUnit.MBPS)
+        assertTrue(result1.hasResult)
+        assertEquals(result2.totalSeconds, result1.totalSeconds)
+
+        // 10,000 Mbps with 1,000 GB
+        val result3 = DownloadCalculator.calculate("1,000", FileSizeUnit.GB, "10,000", SpeedUnit.MBPS)
+        assertTrue(result3.hasResult)
+    }
 }

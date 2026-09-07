@@ -44,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -65,9 +66,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.AppDatabase
 import com.example.data.CalcStateRepository
+import com.example.ui.ThousandsSeparatorVisualTransformation
 import com.example.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
@@ -91,6 +94,16 @@ private val DarkTextColor = Color(0xFFF8FAFC)
 private val LightUnderlineColor = Color(0xFF0F172A)
 private val DarkUnderlineColor = Color(0xFFE2E8F0)
 
+// Reusable static KeyboardOptions to avoid per-recomposition allocations
+private val DecimalNextKeyboardOptions = KeyboardOptions(
+  keyboardType = KeyboardType.Decimal,
+  imeAction = ImeAction.Next
+)
+private val DecimalDoneKeyboardOptions = KeyboardOptions(
+  keyboardType = KeyboardType.Decimal,
+  imeAction = ImeAction.Done
+)
+
 @Composable
 fun DLCalcApp() {
   val context = LocalContext.current
@@ -100,8 +113,8 @@ fun DLCalcApp() {
     factory = DLCalcViewModel.provideFactory(repository)
   )
 
-  val uiState by viewModel.uiState.collectAsState()
-  val result by viewModel.calculationResult.collectAsState()
+  val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+  val result by viewModel.calculationResult.collectAsStateWithLifecycle()
 
   Scaffold(
     modifier = Modifier
@@ -157,6 +170,20 @@ fun DLCalcScreen(
   val underlineColor = if (uiState.isDarkMode) DarkUnderlineColor else LightUnderlineColor
   val backgroundColor = if (uiState.isDarkMode) DarkBgColor else LightBgColor
 
+  val cursorBrush = remember(textColor) { SolidColor(textColor) }
+  val regularTextStyle = remember(textColor) {
+    TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Medium, color = textColor)
+  }
+  val boldCenterTextStyle = remember(textColor) {
+    TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold, color = textColor, textAlign = TextAlign.Center)
+  }
+  val semiBoldCenterTextStyle = remember(textColor) {
+    TextStyle(fontSize = 19.sp, fontWeight = FontWeight.SemiBold, color = textColor, textAlign = TextAlign.Center)
+  }
+  val mediumDropdownTextStyle = remember(textColor) {
+    TextStyle(fontSize = 19.sp, fontWeight = FontWeight.Medium, color = textColor)
+  }
+
   val showTimeUnderline = (uiState.calcMode != CalcMode.TIME)
   val showSizeUnderline = (uiState.calcMode != CalcMode.SIZE)
   val showSpeedUnderline = (uiState.calcMode != CalcMode.SPEED)
@@ -194,12 +221,29 @@ fun DLCalcScreen(
       return result.toTimeBreakdownString()
     }
     val parts = mutableListOf<String>()
-    if (uiState.days.isNotEmpty() && uiState.days != "0") parts.add("${uiState.days} days")
-    if (uiState.hours.isNotEmpty() && uiState.hours != "0") parts.add("${uiState.hours} hours")
-    if (uiState.minutes.isNotEmpty() && uiState.minutes != "0") parts.add("${uiState.minutes} minutes")
-    if (uiState.seconds.isNotEmpty() && uiState.seconds != "0") parts.add("${uiState.seconds} seconds")
-    return parts.joinToString(", ")
+    if (uiState.days.isNotEmpty() && uiState.days != "0") {
+      parts.add("${uiState.days} ${if (uiState.days == "1") "day" else "days"}")
+    }
+    if (uiState.hours.isNotEmpty() && uiState.hours != "0") {
+      parts.add("${uiState.hours} ${if (uiState.hours == "1") "hour" else "hours"}")
+    }
+    if (uiState.minutes.isNotEmpty() && uiState.minutes != "0") {
+      parts.add("${uiState.minutes} ${if (uiState.minutes == "1") "minute" else "minutes"}")
+    }
+    if (uiState.seconds.isNotEmpty() && uiState.seconds != "0") {
+      parts.add("${uiState.seconds} ${if (uiState.seconds == "1") "second" else "seconds"}")
+    }
+    return if (parts.isEmpty()) "0 seconds" else parts.joinToString(", ")
   }
+
+  val currentCopyBreakdownText by rememberUpdatedState(getCopyBreakdownText())
+  val currentCopySecondsText by rememberUpdatedState(
+    if (uiState.calcMode == CalcMode.TIME) {
+      result.toSecondsRawString()
+    } else {
+      uiState.timeSeconds
+    }
+  )
 
   Box(
     modifier = modifier
@@ -224,12 +268,11 @@ fun DLCalcScreen(
           .fillMaxWidth()
           .height(150.dp)
           .testTag("result_box_time")
-          .pointerInput(result, uiState.days, uiState.hours, uiState.minutes, uiState.seconds, uiState.calcMode) {
+          .pointerInput(Unit) {
             detectTapGestures(
               onLongPress = {
-                val copyText = getCopyBreakdownText()
-                if (copyText.isNotEmpty()) {
-                  copyToClipboard(copyText, "Download Time Breakdown")
+                if (currentCopyBreakdownText.isNotEmpty()) {
+                  copyToClipboard(currentCopyBreakdownText, "Download Time Breakdown")
                 }
               }
             )
@@ -243,7 +286,7 @@ fun DLCalcScreen(
         ) {
           TimeBreakdownRow(
             value = if (uiState.calcMode == CalcMode.TIME) {
-              if (result.hasResult) (if (result.isBelowOneSecond) "0" else result.days.toString()) else ""
+              if (result.hasResult) (if (result.isBelowOneSecond) "0" else DownloadCalculator.formatWithCommas(result.days)) else ""
             } else {
               uiState.days
             },
@@ -256,7 +299,7 @@ fun DLCalcScreen(
           )
           TimeBreakdownRow(
             value = if (uiState.calcMode == CalcMode.TIME) {
-              if (result.hasResult) (if (result.isBelowOneSecond) "0" else result.hours.toString()) else ""
+              if (result.hasResult) (if (result.isBelowOneSecond) "0" else DownloadCalculator.formatWithCommas(result.hours)) else ""
             } else {
               uiState.hours
             },
@@ -269,7 +312,7 @@ fun DLCalcScreen(
           )
           TimeBreakdownRow(
             value = if (uiState.calcMode == CalcMode.TIME) {
-              if (result.hasResult) (if (result.isBelowOneSecond) "0" else result.minutes.toString()) else ""
+              if (result.hasResult) (if (result.isBelowOneSecond) "0" else DownloadCalculator.formatWithCommas(result.minutes)) else ""
             } else {
               uiState.minutes
             },
@@ -282,7 +325,7 @@ fun DLCalcScreen(
           )
           TimeBreakdownRow(
             value = if (uiState.calcMode == CalcMode.TIME) {
-              if (result.hasResult) (if (result.isBelowOneSecond) "1<" else result.seconds.toString()) else ""
+              if (result.hasResult) (if (result.isBelowOneSecond) "1<" else DownloadCalculator.formatWithCommas(result.seconds)) else ""
             } else {
               uiState.seconds
             },
@@ -326,16 +369,11 @@ fun DLCalcScreen(
           .fillMaxWidth()
           .height(48.dp)
           .testTag("result_box_seconds")
-          .pointerInput(result, uiState.timeSeconds, uiState.calcMode) {
+          .pointerInput(Unit) {
             detectTapGestures(
               onLongPress = {
-                val copyText = if (uiState.calcMode == CalcMode.TIME) {
-                  result.toSecondsRawString()
-                } else {
-                  uiState.timeSeconds
-                }
-                if (copyText.isNotEmpty()) {
-                  copyToClipboard(copyText, "Download Total Seconds")
+                if (currentCopySecondsText.isNotEmpty()) {
+                  copyToClipboard(currentCopySecondsText, "Download Total Seconds")
                 }
               }
             )
@@ -371,29 +409,17 @@ fun DLCalcScreen(
             if (uiState.calcMode == CalcMode.TIME) {
               Text(
                 text = if (result.hasResult) result.formattedTotalSeconds else "",
-                style = TextStyle(
-                  fontSize = 20.sp,
-                  fontWeight = FontWeight.Bold,
-                  color = textColor,
-                  textAlign = TextAlign.Center
-                )
+                style = boldCenterTextStyle
               )
             } else {
               BasicTextField(
                 value = uiState.timeSeconds,
                 onValueChange = onTimeSecondsChange,
                 singleLine = true,
-                textStyle = TextStyle(
-                  fontSize = 20.sp,
-                  fontWeight = FontWeight.Bold,
-                  color = textColor,
-                  textAlign = TextAlign.Center
-                ),
-                cursorBrush = SolidColor(textColor),
-                keyboardOptions = KeyboardOptions(
-                  keyboardType = KeyboardType.Decimal,
-                  imeAction = ImeAction.Next
-                ),
+                visualTransformation = ThousandsSeparatorVisualTransformation,
+                textStyle = boldCenterTextStyle,
+                cursorBrush = cursorBrush,
+                keyboardOptions = DecimalNextKeyboardOptions,
                 modifier = Modifier
                   .fillMaxWidth()
                   .testTag("time_seconds_input")
@@ -405,11 +431,7 @@ fun DLCalcScreen(
 
           Text(
             text = "seconds",
-            style = TextStyle(
-              fontSize = 20.sp,
-              fontWeight = FontWeight.Medium,
-              color = textColor
-            )
+            style = regularTextStyle
           )
         }
 
@@ -452,11 +474,7 @@ fun DLCalcScreen(
       ) {
         Text(
           text = "File size:",
-          style = TextStyle(
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Medium,
-            color = textColor
-          ),
+          style = regularTextStyle,
           modifier = Modifier.width(96.dp)
         )
 
@@ -485,29 +503,17 @@ fun DLCalcScreen(
           if (uiState.calcMode == CalcMode.SIZE) {
             Text(
               text = if (result.hasResult) result.calculatedSize else "",
-              style = TextStyle(
-                fontSize = 19.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = textColor,
-                textAlign = TextAlign.Center
-              )
+              style = semiBoldCenterTextStyle
             )
           } else {
             BasicTextField(
               value = uiState.fileSize,
               onValueChange = onFileSizeChange,
               singleLine = true,
-              textStyle = TextStyle(
-                fontSize = 19.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = textColor,
-                textAlign = TextAlign.Center
-              ),
-              cursorBrush = SolidColor(textColor),
-              keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Decimal,
-                imeAction = ImeAction.Next
-              ),
+              visualTransformation = ThousandsSeparatorVisualTransformation,
+              textStyle = semiBoldCenterTextStyle,
+              cursorBrush = cursorBrush,
+              keyboardOptions = DecimalNextKeyboardOptions,
               modifier = Modifier
                 .fillMaxWidth()
                 .testTag("file_size_input")
@@ -531,11 +537,7 @@ fun DLCalcScreen(
           ) {
             Text(
               text = displayedFileSizeUnit.label,
-              style = TextStyle(
-                fontSize = 19.sp,
-                fontWeight = FontWeight.Medium,
-                color = textColor
-              )
+              style = mediumDropdownTextStyle
             )
             Icon(
               imageVector = Icons.Default.ArrowDropDown,
@@ -574,11 +576,7 @@ fun DLCalcScreen(
       ) {
         Text(
           text = "Speed:",
-          style = TextStyle(
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Medium,
-            color = textColor
-          ),
+          style = regularTextStyle,
           modifier = Modifier.width(96.dp)
         )
 
@@ -607,29 +605,17 @@ fun DLCalcScreen(
           if (uiState.calcMode == CalcMode.SPEED) {
             Text(
               text = if (result.hasResult) result.calculatedSpeed else "",
-              style = TextStyle(
-                fontSize = 19.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = textColor,
-                textAlign = TextAlign.Center
-              )
+              style = semiBoldCenterTextStyle
             )
           } else {
             BasicTextField(
               value = uiState.speed,
               onValueChange = onSpeedChange,
               singleLine = true,
-              textStyle = TextStyle(
-                fontSize = 19.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = textColor,
-                textAlign = TextAlign.Center
-              ),
-              cursorBrush = SolidColor(textColor),
-              keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Decimal,
-                imeAction = ImeAction.Done
-              ),
+              visualTransformation = ThousandsSeparatorVisualTransformation,
+              textStyle = semiBoldCenterTextStyle,
+              cursorBrush = cursorBrush,
+              keyboardOptions = DecimalDoneKeyboardOptions,
               keyboardActions = KeyboardActions(
                 onDone = { focusManager.clearFocus() }
               ),
@@ -656,11 +642,7 @@ fun DLCalcScreen(
           ) {
             Text(
               text = displayedSpeedUnit.label,
-              style = TextStyle(
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Medium,
-                color = textColor
-              )
+              style = mediumDropdownTextStyle
             )
             Icon(
               imageVector = Icons.Default.ArrowDropDown,
@@ -761,16 +743,35 @@ private fun TimeBreakdownRow(
   isEditable: Boolean,
   onValueChange: (String) -> Unit = {}
 ) {
+  val cursorBrush = remember(textColor) { SolidColor(textColor) }
+  val boldEndTextStyle = remember(textColor) {
+    TextStyle(
+      fontFamily = FontFamily.SansSerif,
+      fontWeight = FontWeight.Bold,
+      fontSize = 20.sp,
+      color = textColor,
+      textAlign = TextAlign.End
+    )
+  }
+  val mediumUnitTextStyle = remember(textColor) {
+    TextStyle(
+      fontFamily = FontFamily.SansSerif,
+      fontWeight = FontWeight.Medium,
+      fontSize = 20.sp,
+      color = textColor
+    )
+  }
+
   Row(
     modifier = Modifier
-      .width(220.dp)
+      .width(235.dp)
       .height(28.dp),
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.Start
   ) {
     Box(
       modifier = Modifier
-        .width(70.dp)
+        .width(80.dp)
         .height(28.dp)
         .then(
           if (showUnderline) {
@@ -793,18 +794,10 @@ private fun TimeBreakdownRow(
           value = value,
           onValueChange = onValueChange,
           singleLine = true,
-          textStyle = TextStyle(
-            fontFamily = FontFamily.SansSerif,
-            fontWeight = FontWeight.Bold,
-            fontSize = 20.sp,
-            color = textColor,
-            textAlign = TextAlign.End
-          ),
-          cursorBrush = SolidColor(textColor),
-          keyboardOptions = KeyboardOptions(
-            keyboardType = KeyboardType.Decimal,
-            imeAction = ImeAction.Next
-          ),
+          visualTransformation = ThousandsSeparatorVisualTransformation,
+          textStyle = boldEndTextStyle,
+          cursorBrush = cursorBrush,
+          keyboardOptions = DecimalNextKeyboardOptions,
           modifier = Modifier
             .fillMaxWidth()
             .testTag("input_$unit")
@@ -812,13 +805,7 @@ private fun TimeBreakdownRow(
       } else {
         Text(
           text = value,
-          style = TextStyle(
-            fontFamily = FontFamily.SansSerif,
-            fontWeight = FontWeight.Bold,
-            fontSize = 20.sp,
-            color = textColor,
-            textAlign = TextAlign.End
-          ),
+          style = boldEndTextStyle,
           modifier = Modifier.fillMaxWidth()
         )
       }
@@ -826,12 +813,7 @@ private fun TimeBreakdownRow(
     Spacer(modifier = Modifier.width(12.dp))
     Text(
       text = unit,
-      style = TextStyle(
-        fontFamily = FontFamily.SansSerif,
-        fontWeight = FontWeight.Medium,
-        fontSize = 20.sp,
-        color = textColor
-      )
+      style = mediumUnitTextStyle
     )
   }
 }
