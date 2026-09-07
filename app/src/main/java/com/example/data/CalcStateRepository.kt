@@ -10,6 +10,12 @@ class CalcStateRepository(private val dao: CalcStateDao) {
         fileSizeUnit: String,
         speed: String,
         speedUnit: String,
+        days: String = "",
+        hours: String = "",
+        minutes: String = "",
+        seconds: String = "",
+        timeSeconds: String = "",
+        calcMode: String = "NONE",
         isDarkMode: Boolean
     ) {
         dao.saveCalcState(
@@ -19,6 +25,12 @@ class CalcStateRepository(private val dao: CalcStateDao) {
                 fileSizeUnit = fileSizeUnit,
                 speed = speed,
                 speedUnit = speedUnit,
+                days = days,
+                hours = hours,
+                minutes = minutes,
+                seconds = seconds,
+                timeSeconds = timeSeconds,
+                calcMode = calcMode,
                 isDarkMode = isDarkMode
             )
         )

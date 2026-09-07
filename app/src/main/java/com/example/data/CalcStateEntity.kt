@@ -10,5 +10,11 @@ data class CalcStateEntity(
     val fileSizeUnit: String,
     val speed: String,
     val speedUnit: String,
+    val days: String = "",
+    val hours: String = "",
+    val minutes: String = "",
+    val seconds: String = "",
+    val timeSeconds: String = "",
+    val calcMode: String = "NONE",
     val isDarkMode: Boolean
 )

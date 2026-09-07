@@ -89,4 +89,134 @@ class DownloadCalculatorTest {
         assertTrue(resultKb.hasResult)
         assertEquals(10L, resultKb.totalSeconds)
     }
+
+    @Test
+    fun testTriangleCalculationSpeedFromSizeAndTime() {
+        // 100 MB in 10 seconds -> Speed in MB/s should be 10
+        val speedResult = DownloadCalculator.calculate(
+            fileSizeStr = "100",
+            fileUnit = FileSizeUnit.MB,
+            speedStr = "",
+            speedUnit = SpeedUnit.MB_S,
+            timeStr = "10",
+            mode = CalcMode.SPEED
+        )
+        assertTrue(speedResult.hasResult)
+        assertEquals("10", speedResult.calculatedSpeed)
+        assertEquals(10L, speedResult.totalSeconds)
+        assertEquals("10 seconds", speedResult.toTimeBreakdownString())
+    }
+
+    @Test
+    fun testTriangleCalculationSizeFromSpeedAndTime() {
+        // 10 MB/s for 10 seconds -> Size in MB should be 100
+        val sizeResult = DownloadCalculator.calculate(
+            fileSizeStr = "",
+            fileUnit = FileSizeUnit.MB,
+            speedStr = "10",
+            speedUnit = SpeedUnit.MB_S,
+            timeStr = "10",
+            mode = CalcMode.SIZE
+        )
+        assertTrue(sizeResult.hasResult)
+        assertEquals("100", sizeResult.calculatedSize)
+        assertEquals(FileSizeUnit.MB, sizeResult.calculatedSizeUnit)
+        assertEquals(10L, sizeResult.totalSeconds)
+        assertEquals("10 seconds", sizeResult.toTimeBreakdownString())
+    }
+
+    @Test
+    fun testAutoRaiseSpeedUnitToGbpsWhen1000Mbps() {
+        // 125 MB in 1 second = 125,000,000 bytes/sec = 1000 Mbps -> should auto-raise to 1 Gbps
+        // 125 MB = 125 * 1024 * 1024 = 131,072,000 bytes
+        // Let's create exact 1000 Mbps = 125,000,000 bytes/sec:
+        // Size in MB: 125,000,000 / (1024 * 1024) = 119.20928955078125 MB
+        // In 1 second, bytesPerSec = 125,000,000 -> 1000 Mbps -> 1 Gbps
+        val (speedExact, bestUnit) = DownloadCalculator.determineBestSpeedUnit(125_000_000.0, SpeedUnit.MBPS)
+        assertEquals(SpeedUnit.GBPS, bestUnit)
+        assertEquals(1.0, speedExact, 0.001)
+
+        // Test 2500 Mbps -> 2.5 Gbps
+        val (speedExact2, bestUnit2) = DownloadCalculator.determineBestSpeedUnit(312_500_000.0, SpeedUnit.MBPS)
+        assertEquals(SpeedUnit.GBPS, bestUnit2)
+        assertEquals(2.5, speedExact2, 0.001)
+
+        // Test 500 Mbps -> stays 500 Mbps
+        val (speedExact3, bestUnit3) = DownloadCalculator.determineBestSpeedUnit(62_500_000.0, SpeedUnit.MBPS)
+        assertEquals(SpeedUnit.MBPS, bestUnit3)
+        assertEquals(500.0, speedExact3, 0.001)
+    }
+
+    @Test
+    fun testAutoLowerSpeedUnitToMbpsWhenBelow1Gbps() {
+        // Preferred unit is Gbps, but calculated speed is 0.5 Gbps (500 Mbps)
+        val (speedExact, bestUnit) = DownloadCalculator.determineBestSpeedUnit(62_500_000.0, SpeedUnit.GBPS)
+        assertEquals(SpeedUnit.MBPS, bestUnit)
+        assertEquals(500.0, speedExact, 0.001)
+    }
+
+    @Test
+    fun testAutoRaiseAndLowerSpeedByteRate() {
+        // 2048 KB/s -> 2 MB/s
+        val (speedExact1, bestUnit1) = DownloadCalculator.determineBestSpeedUnit(2048.0 * 1024.0, SpeedUnit.KB_S)
+        assertEquals(SpeedUnit.MB_S, bestUnit1)
+        assertEquals(2.0, speedExact1, 0.001)
+
+        // 0.5 MB/s -> 512 KB/s
+        val (speedExact2, bestUnit2) = DownloadCalculator.determineBestSpeedUnit(0.5 * 1024.0 * 1024.0, SpeedUnit.MB_S)
+        assertEquals(SpeedUnit.KB_S, bestUnit2)
+        assertEquals(512.0, speedExact2, 0.001)
+    }
+
+    @Test
+    fun testAutoLowerSizeUnitToMBInsteadOf0Point8GB() {
+        // 0.8 GB = 0.8 * 1024 * 1024 * 1024 bytes -> < 1 GB, so lowers to MB: 819.2 MB
+        val (sizeExact, bestUnit) = DownloadCalculator.determineBestSizeUnit(
+            0.8 * FileSizeUnit.GB.bytesMultiplier,
+            FileSizeUnit.GB
+        )
+        assertEquals(FileSizeUnit.MB, bestUnit)
+        assertEquals(819.2, sizeExact, 0.01)
+
+        // Size calculation directly via calculate method:
+        // 81.92 MB/s for 10 seconds = 819.2 MB
+        val result = DownloadCalculator.calculate(
+            fileSizeStr = "",
+            fileUnit = FileSizeUnit.GB,
+            speedStr = "81.92",
+            speedUnit = SpeedUnit.MB_S,
+            timeStr = "10",
+            mode = CalcMode.SIZE
+        )
+        assertTrue(result.hasResult)
+        assertEquals(FileSizeUnit.MB, result.calculatedSizeUnit)
+        assertEquals("819.2", result.calculatedSize)
+    }
+
+    @Test
+    fun testAutoRaiseSizeUnitToGBAndTB() {
+        // 2048 MB -> 2 GB
+        val (sizeExact1, bestUnit1) = DownloadCalculator.determineBestSizeUnit(
+            2048.0 * FileSizeUnit.MB.bytesMultiplier,
+            FileSizeUnit.MB
+        )
+        assertEquals(FileSizeUnit.GB, bestUnit1)
+        assertEquals(2.0, sizeExact1, 0.001)
+
+        // 2048 GB -> 2 TB
+        val (sizeExact2, bestUnit2) = DownloadCalculator.determineBestSizeUnit(
+            2048.0 * FileSizeUnit.GB.bytesMultiplier,
+            FileSizeUnit.GB
+        )
+        assertEquals(FileSizeUnit.TB, bestUnit2)
+        assertEquals(2.0, sizeExact2, 0.001)
+
+        // 0.5 TB -> lowers to 512 GB
+        val (sizeExact3, bestUnit3) = DownloadCalculator.determineBestSizeUnit(
+            0.5 * FileSizeUnit.TB.bytesMultiplier,
+            FileSizeUnit.TB
+        )
+        assertEquals(FileSizeUnit.GB, bestUnit3)
+        assertEquals(512.0, sizeExact3, 0.001)
+    }
 }
