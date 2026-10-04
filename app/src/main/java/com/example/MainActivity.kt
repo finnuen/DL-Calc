@@ -286,7 +286,11 @@ fun DLCalcScreen(
         ) {
           TimeBreakdownRow(
             value = if (uiState.calcMode == CalcMode.TIME) {
-              if (result.hasResult) (if (result.isBelowOneSecond) "0" else DownloadCalculator.formatWithCommas(result.days)) else ""
+              if (result.hasResult && !result.isBelowOneSecond && result.days > 0) {
+                DownloadCalculator.formatWithCommas(result.days)
+              } else {
+                ""
+              }
             } else {
               uiState.days
             },
@@ -299,7 +303,11 @@ fun DLCalcScreen(
           )
           TimeBreakdownRow(
             value = if (uiState.calcMode == CalcMode.TIME) {
-              if (result.hasResult) (if (result.isBelowOneSecond) "0" else DownloadCalculator.formatWithCommas(result.hours)) else ""
+              if (result.hasResult && !result.isBelowOneSecond && result.hours > 0) {
+                DownloadCalculator.formatWithCommas(result.hours)
+              } else {
+                ""
+              }
             } else {
               uiState.hours
             },
@@ -312,7 +320,11 @@ fun DLCalcScreen(
           )
           TimeBreakdownRow(
             value = if (uiState.calcMode == CalcMode.TIME) {
-              if (result.hasResult) (if (result.isBelowOneSecond) "0" else DownloadCalculator.formatWithCommas(result.minutes)) else ""
+              if (result.hasResult && !result.isBelowOneSecond && result.minutes > 0) {
+                DownloadCalculator.formatWithCommas(result.minutes)
+              } else {
+                ""
+              }
             } else {
               uiState.minutes
             },
@@ -325,7 +337,17 @@ fun DLCalcScreen(
           )
           TimeBreakdownRow(
             value = if (uiState.calcMode == CalcMode.TIME) {
-              if (result.hasResult) (if (result.isBelowOneSecond) "1<" else DownloadCalculator.formatWithCommas(result.seconds)) else ""
+              if (result.hasResult) {
+                if (result.isBelowOneSecond) {
+                  "1<"
+                } else if (result.seconds > 0) {
+                  DownloadCalculator.formatWithCommas(result.seconds)
+                } else {
+                  ""
+                }
+              } else {
+                ""
+              }
             } else {
               uiState.seconds
             },

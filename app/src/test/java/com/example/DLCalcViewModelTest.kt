@@ -73,6 +73,20 @@ class DLCalcViewModelTest {
         assertEquals("1", viewModel.uiState.value.hours)
         assertEquals("1", viewModel.uiState.value.minutes)
         assertEquals("5", viewModel.uiState.value.seconds)
+
+        // 70 seconds = 0 days, 0 hours, 1 minute, 10 seconds -> 0s are left blank
+        viewModel.onTimeSecondsChange("70")
+        assertEquals("", viewModel.uiState.value.days)
+        assertEquals("", viewModel.uiState.value.hours)
+        assertEquals("1", viewModel.uiState.value.minutes)
+        assertEquals("10", viewModel.uiState.value.seconds)
+
+        // 86400 seconds = 1 day, 0 hours, 0 minutes, 0 seconds -> 0s are left blank
+        viewModel.onTimeSecondsChange("86400")
+        assertEquals("1", viewModel.uiState.value.days)
+        assertEquals("", viewModel.uiState.value.hours)
+        assertEquals("", viewModel.uiState.value.minutes)
+        assertEquals("", viewModel.uiState.value.seconds)
     }
 
     @Test

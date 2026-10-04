@@ -139,8 +139,6 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
         val total = d * 86400.0 + h * 3600.0 + m * 60.0 + s
         return if (total > 0.0) {
             if (total % 1.0 == 0.0) total.toLong().toString() else total.toString()
-        } else if (days.isNotEmpty() || hours.isNotEmpty() || minutes.isNotEmpty() || seconds.isNotEmpty()) {
-            "0"
         } else {
             ""
         }
@@ -343,9 +341,9 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
                 val s = remH % 60
                 listOf(
                     if (d > 0) d.toString() else "",
-                    if (h > 0 || d > 0) h.toString() else "",
-                    if (m > 0 || h > 0 || d > 0) m.toString() else "",
-                    s.toString()
+                    if (h > 0) h.toString() else "",
+                    if (m > 0) m.toString() else "",
+                    if (s > 0) s.toString() else ""
                 )
             } else {
                 listOf("", "", "", "")
