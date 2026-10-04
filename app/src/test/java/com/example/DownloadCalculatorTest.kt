@@ -232,4 +232,19 @@ class DownloadCalculatorTest {
         val result3 = DownloadCalculator.calculate("1,000", FileSizeUnit.GB, "10,000", SpeedUnit.MBPS)
         assertTrue(result3.hasResult)
     }
+
+    @Test
+    fun testFileSizeAdditionExpression() {
+        // 40+10+50 GB = 100 GB
+        val exprResult = DownloadCalculator.calculate("40+10+50", FileSizeUnit.GB, "100", SpeedUnit.MBPS)
+        val directResult = DownloadCalculator.calculate("100", FileSizeUnit.GB, "100", SpeedUnit.MBPS)
+        assertTrue(exprResult.hasResult)
+        assertEquals(directResult.totalSeconds, exprResult.totalSeconds)
+        assertEquals("100", DownloadCalculator.resolveFileSizeString("40+10+50"))
+        assertEquals("3.5", DownloadCalculator.resolveFileSizeString("1.2+2.3"))
+        assertEquals("=15", DownloadCalculator.formatFileSizeResultSuffix("5+5+5"))
+        assertEquals("=90", DownloadCalculator.formatFileSizeResultSuffix("50+40"))
+        assertEquals("", DownloadCalculator.formatFileSizeResultSuffix("50"))
+        assertEquals("", DownloadCalculator.formatFileSizeResultSuffix("50+"))
+    }
 }

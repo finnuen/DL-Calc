@@ -11,6 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,10 +22,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -32,6 +34,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -41,13 +44,19 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -57,8 +66,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -70,6 +79,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.AppDatabase
 import com.example.data.CalcStateRepository
+import com.example.ui.FileSizeVisualTransformation
 import com.example.ui.ThousandsSeparatorVisualTransformation
 import com.example.ui.theme.MyApplicationTheme
 
@@ -94,14 +104,29 @@ private val DarkTextColor = Color(0xFFF8FAFC)
 private val LightUnderlineColor = Color(0xFF0F172A)
 private val DarkUnderlineColor = Color(0xFFE2E8F0)
 
-// Reusable static KeyboardOptions to avoid per-recomposition allocations
+// Reusable static KeyboardOptions and Shapes to avoid per-recomposition allocations
 private val DecimalNextKeyboardOptions = KeyboardOptions(
   keyboardType = KeyboardType.Decimal,
+  imeAction = ImeAction.Next
+)
+private val FileSizeKeyboardOptions = KeyboardOptions(
+  keyboardType = KeyboardType.Phone,
   imeAction = ImeAction.Next
 )
 private val DecimalDoneKeyboardOptions = KeyboardOptions(
   keyboardType = KeyboardType.Decimal,
   imeAction = ImeAction.Done
+)
+private val ActionButtonShape = RoundedCornerShape(12.dp)
+private val WhiteButtonTextStyle = TextStyle(
+  fontSize = 19.sp,
+  fontWeight = FontWeight.Bold,
+  color = Color.White
+)
+private val BlackButtonTextStyle = TextStyle(
+  fontSize = 19.sp,
+  fontWeight = FontWeight.Bold,
+  color = Color.Black
 )
 
 @Composable
@@ -117,9 +142,8 @@ fun DLCalcApp() {
   val result by viewModel.calculationResult.collectAsStateWithLifecycle()
 
   Scaffold(
-    modifier = Modifier
-      .fillMaxSize()
-      .windowInsetsPadding(WindowInsets.safeDrawing),
+    modifier = Modifier.fillMaxSize(),
+    contentWindowInsets = WindowInsets.systemBars,
     containerColor = if (uiState.isDarkMode) DarkBgColor else LightBgColor
   ) { innerPadding ->
     DLCalcScreen(
@@ -171,17 +195,24 @@ fun DLCalcScreen(
   val backgroundColor = if (uiState.isDarkMode) DarkBgColor else LightBgColor
 
   val cursorBrush = remember(textColor) { SolidColor(textColor) }
+  val subtleIconTint = remember(textColor) { textColor.copy(alpha = 0.35f) }
   val regularTextStyle = remember(textColor) {
     TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Medium, color = textColor)
   }
-  val boldCenterTextStyle = remember(textColor) {
-    TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold, color = textColor, textAlign = TextAlign.Center)
+  val boldEndTextStyle = remember(textColor) {
+    TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold, color = textColor, textAlign = TextAlign.End)
   }
-  val semiBoldCenterTextStyle = remember(textColor) {
-    TextStyle(fontSize = 19.sp, fontWeight = FontWeight.SemiBold, color = textColor, textAlign = TextAlign.Center)
+  val semiBoldEndTextStyle = remember(textColor) {
+    TextStyle(fontSize = 19.sp, fontWeight = FontWeight.SemiBold, color = textColor, textAlign = TextAlign.End)
   }
   val mediumDropdownTextStyle = remember(textColor) {
     TextStyle(fontSize = 19.sp, fontWeight = FontWeight.Medium, color = textColor)
+  }
+  val tooltipTextStyle = remember(textColor) {
+    TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium, color = textColor)
+  }
+  val doneKeyboardActions = remember(focusManager) {
+    KeyboardActions(onDone = { focusManager.clearFocus() })
   }
 
   val showTimeUnderline = (uiState.calcMode != CalcMode.TIME)
@@ -213,37 +244,52 @@ fun DLCalcScreen(
     }
   }
 
-  fun getCopyBreakdownText(): String {
+  val copyBreakdownText = remember(
+    uiState.calcMode,
+    uiState.days,
+    uiState.hours,
+    uiState.minutes,
+    uiState.seconds,
+    result
+  ) {
     if (uiState.calcMode == CalcMode.TIME) {
-      return result.toTimeBreakdownString()
+      result.toTimeBreakdownString()
+    } else {
+      val fromResult = if (result.hasResult) result.toTimeBreakdownString() else ""
+      if (fromResult.isNotEmpty()) {
+        fromResult
+      } else {
+        val sb = StringBuilder()
+        if (uiState.days.isNotEmpty() && uiState.days != "0") {
+          sb.append(uiState.days).append(if (uiState.days == "1") " day" else " days")
+        }
+        if (uiState.hours.isNotEmpty() && uiState.hours != "0") {
+          if (sb.isNotEmpty()) sb.append(", ")
+          sb.append(uiState.hours).append(if (uiState.hours == "1") " hour" else " hours")
+        }
+        if (uiState.minutes.isNotEmpty() && uiState.minutes != "0") {
+          if (sb.isNotEmpty()) sb.append(", ")
+          sb.append(uiState.minutes).append(if (uiState.minutes == "1") " minute" else " minutes")
+        }
+        if (uiState.seconds.isNotEmpty() && uiState.seconds != "0") {
+          if (sb.isNotEmpty()) sb.append(", ")
+          sb.append(uiState.seconds).append(if (uiState.seconds == "1") " second" else " seconds")
+        }
+        if (sb.isEmpty()) "0 seconds" else sb.toString()
+      }
     }
-    if (result.hasResult && result.toTimeBreakdownString().isNotEmpty()) {
-      return result.toTimeBreakdownString()
-    }
-    val parts = mutableListOf<String>()
-    if (uiState.days.isNotEmpty() && uiState.days != "0") {
-      parts.add("${uiState.days} ${if (uiState.days == "1") "day" else "days"}")
-    }
-    if (uiState.hours.isNotEmpty() && uiState.hours != "0") {
-      parts.add("${uiState.hours} ${if (uiState.hours == "1") "hour" else "hours"}")
-    }
-    if (uiState.minutes.isNotEmpty() && uiState.minutes != "0") {
-      parts.add("${uiState.minutes} ${if (uiState.minutes == "1") "minute" else "minutes"}")
-    }
-    if (uiState.seconds.isNotEmpty() && uiState.seconds != "0") {
-      parts.add("${uiState.seconds} ${if (uiState.seconds == "1") "second" else "seconds"}")
-    }
-    return if (parts.isEmpty()) "0 seconds" else parts.joinToString(", ")
   }
 
-  val currentCopyBreakdownText by rememberUpdatedState(getCopyBreakdownText())
-  val currentCopySecondsText by rememberUpdatedState(
+  val copySecondsText = remember(uiState.calcMode, uiState.timeSeconds, result) {
     if (uiState.calcMode == CalcMode.TIME) {
       result.toSecondsRawString()
     } else {
       uiState.timeSeconds
     }
-  )
+  }
+
+  val currentCopyBreakdownText by rememberUpdatedState(copyBreakdownText)
+  val currentCopySecondsText by rememberUpdatedState(copySecondsText)
 
   Box(
     modifier = modifier
@@ -285,74 +331,44 @@ fun DLCalcScreen(
           horizontalAlignment = Alignment.CenterHorizontally
         ) {
           TimeBreakdownRow(
-            value = if (uiState.calcMode == CalcMode.TIME) {
-              if (result.hasResult && !result.isBelowOneSecond && result.days > 0) {
-                DownloadCalculator.formatWithCommas(result.days)
-              } else {
-                ""
-              }
-            } else {
-              uiState.days
-            },
+            value = if (uiState.calcMode == CalcMode.TIME) result.formattedDays else uiState.days,
             unit = "days",
-            textColor = textColor,
+            valueTextStyle = boldEndTextStyle,
+            unitTextStyle = regularTextStyle,
+            cursorBrush = cursorBrush,
             underlineColor = underlineColor,
             showUnderline = showTimeUnderline,
             isEditable = (uiState.calcMode != CalcMode.TIME),
             onValueChange = onDaysChange
           )
           TimeBreakdownRow(
-            value = if (uiState.calcMode == CalcMode.TIME) {
-              if (result.hasResult && !result.isBelowOneSecond && result.hours > 0) {
-                DownloadCalculator.formatWithCommas(result.hours)
-              } else {
-                ""
-              }
-            } else {
-              uiState.hours
-            },
+            value = if (uiState.calcMode == CalcMode.TIME) result.formattedHours else uiState.hours,
             unit = "hours",
-            textColor = textColor,
+            valueTextStyle = boldEndTextStyle,
+            unitTextStyle = regularTextStyle,
+            cursorBrush = cursorBrush,
             underlineColor = underlineColor,
             showUnderline = showTimeUnderline,
             isEditable = (uiState.calcMode != CalcMode.TIME),
             onValueChange = onHoursChange
           )
           TimeBreakdownRow(
-            value = if (uiState.calcMode == CalcMode.TIME) {
-              if (result.hasResult && !result.isBelowOneSecond && result.minutes > 0) {
-                DownloadCalculator.formatWithCommas(result.minutes)
-              } else {
-                ""
-              }
-            } else {
-              uiState.minutes
-            },
+            value = if (uiState.calcMode == CalcMode.TIME) result.formattedMinutes else uiState.minutes,
             unit = "minutes",
-            textColor = textColor,
+            valueTextStyle = boldEndTextStyle,
+            unitTextStyle = regularTextStyle,
+            cursorBrush = cursorBrush,
             underlineColor = underlineColor,
             showUnderline = showTimeUnderline,
             isEditable = (uiState.calcMode != CalcMode.TIME),
             onValueChange = onMinutesChange
           )
           TimeBreakdownRow(
-            value = if (uiState.calcMode == CalcMode.TIME) {
-              if (result.hasResult) {
-                if (result.isBelowOneSecond) {
-                  "1<"
-                } else if (result.seconds > 0) {
-                  DownloadCalculator.formatWithCommas(result.seconds)
-                } else {
-                  ""
-                }
-              } else {
-                ""
-              }
-            } else {
-              uiState.seconds
-            },
+            value = if (uiState.calcMode == CalcMode.TIME) result.formattedSeconds else uiState.seconds,
             unit = "seconds",
-            textColor = textColor,
+            valueTextStyle = boldEndTextStyle,
+            unitTextStyle = regularTextStyle,
+            cursorBrush = cursorBrush,
             underlineColor = underlineColor,
             showUnderline = showTimeUnderline,
             isEditable = (uiState.calcMode != CalcMode.TIME),
@@ -363,9 +379,8 @@ fun DLCalcScreen(
         // Tap & hold helper copy button (32.dp, aligned with the seconds copy button)
         IconButton(
           onClick = {
-            val copyText = getCopyBreakdownText()
-            if (copyText.isNotEmpty()) {
-              copyToClipboard(copyText, "Download Time Breakdown")
+            if (copyBreakdownText.isNotEmpty()) {
+              copyToClipboard(copyBreakdownText, "Download Time Breakdown")
             }
           },
           modifier = Modifier
@@ -376,7 +391,7 @@ fun DLCalcScreen(
           Icon(
             imageVector = Icons.Default.ContentCopy,
             contentDescription = "Copy breakdown",
-            tint = textColor.copy(alpha = 0.35f),
+            tint = subtleIconTint,
             modifier = Modifier.size(16.dp)
           )
         }
@@ -426,12 +441,13 @@ fun DLCalcScreen(
                   }
                 } else Modifier
               ),
-            contentAlignment = Alignment.Center
+            contentAlignment = Alignment.CenterEnd
           ) {
             if (uiState.calcMode == CalcMode.TIME) {
               Text(
                 text = if (result.hasResult) result.formattedTotalSeconds else "",
-                style = boldCenterTextStyle
+                style = boldEndTextStyle,
+                modifier = Modifier.fillMaxWidth()
               )
             } else {
               BasicTextField(
@@ -439,7 +455,7 @@ fun DLCalcScreen(
                 onValueChange = onTimeSecondsChange,
                 singleLine = true,
                 visualTransformation = ThousandsSeparatorVisualTransformation,
-                textStyle = boldCenterTextStyle,
+                textStyle = boldEndTextStyle,
                 cursorBrush = cursorBrush,
                 keyboardOptions = DecimalNextKeyboardOptions,
                 modifier = Modifier
@@ -460,13 +476,8 @@ fun DLCalcScreen(
         // Copy button perfectly aligned with top copy button (same size 32.dp and horizontal margin)
         IconButton(
           onClick = {
-            val copyText = if (uiState.calcMode == CalcMode.TIME) {
-              result.toSecondsRawString()
-            } else {
-              uiState.timeSeconds
-            }
-            if (copyText.isNotEmpty()) {
-              copyToClipboard(copyText, "Download Total Seconds")
+            if (copySecondsText.isNotEmpty()) {
+              copyToClipboard(copySecondsText, "Download Total Seconds")
             }
           },
           modifier = Modifier
@@ -477,7 +488,7 @@ fun DLCalcScreen(
           Icon(
             imageVector = Icons.Default.ContentCopy,
             contentDescription = "Copy total seconds",
-            tint = textColor.copy(alpha = 0.35f),
+            tint = subtleIconTint,
             modifier = Modifier.size(16.dp)
           )
         }
@@ -485,102 +496,200 @@ fun DLCalcScreen(
 
       Spacer(modifier = Modifier.height(24.dp))
 
-      // 3. File size row: File size: _____ GB v
-      // Standardized layout with matching slot widths for perfect vertical alignment of inputs and dropdowns
-      Row(
+      // 3. File size row: File size: _____ GB v   [ⓘ]
+      // Standardized layout with matching slot widths for perfect vertical alignment of inputs, dropdowns, and [copy] column
+      var isFileSizeFocused by remember { mutableStateOf(false) }
+      var isFileSizeInfoExpanded by remember { mutableStateOf(false) }
+      val fileSizeFocusRequester = remember { FocusRequester() }
+      val fileSizeScrollState = rememberScrollState()
+      val unfocusedFileSizeDisplay = remember(uiState.fileSize, isFileSizeFocused) {
+        if (!isFileSizeFocused && uiState.fileSize.contains('+')) {
+          val suffix = DownloadCalculator.formatFileSizeResultSuffix(uiState.fileSize)
+          if (suffix.isNotEmpty()) {
+            FileSizeVisualTransformation.Unfocused.filter(
+              AnnotatedString(uiState.fileSize)
+            ).text.text
+          } else {
+            ""
+          }
+        } else {
+          ""
+        }
+      }
+      LaunchedEffect(unfocusedFileSizeDisplay) {
+        if (unfocusedFileSizeDisplay.isNotEmpty()) {
+          withFrameNanos { }
+          fileSizeScrollState.scrollTo(fileSizeScrollState.maxValue)
+        }
+      }
+
+      Box(
         modifier = Modifier
           .fillMaxWidth()
-          .height(48.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
+          .height(48.dp)
+          .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.CenterStart
       ) {
-        Text(
-          text = "File size:",
-          style = regularTextStyle,
-          modifier = Modifier.width(96.dp)
-        )
-
-        // Underline input field (static fixed width: 95.dp)
-        Box(
+        Row(
           modifier = Modifier
-            .width(95.dp)
-            .height(40.dp)
-            .then(
-              if (showSizeUnderline) {
-                Modifier.drawBehind {
-                  val strokeWidth = 1.5.dp.toPx()
-                  val y = size.height - strokeWidth / 2
-                  drawLine(
-                    color = underlineColor,
-                    start = Offset(0f, y),
-                    end = Offset(size.width, y),
-                    strokeWidth = strokeWidth
+            .fillMaxWidth()
+            .height(48.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.Center
+        ) {
+          Text(
+            text = "File size:",
+            style = regularTextStyle,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.width(88.dp)
+          )
+
+          // Underline input field (static fixed width: 90.dp)
+          Box(
+            modifier = Modifier
+              .width(90.dp)
+              .height(40.dp)
+              .then(
+                if (showSizeUnderline) {
+                  Modifier.drawBehind {
+                    val strokeWidth = 1.5.dp.toPx()
+                    val y = size.height - strokeWidth / 2
+                    drawLine(
+                      color = underlineColor,
+                      start = Offset(0f, y),
+                      end = Offset(size.width, y),
+                      strokeWidth = strokeWidth
+                    )
+                  }
+                } else Modifier
+              )
+              .padding(horizontal = 4.dp, vertical = 4.dp),
+            contentAlignment = Alignment.CenterEnd
+          ) {
+            if (uiState.calcMode == CalcMode.SIZE) {
+              Text(
+                text = if (result.hasResult) result.calculatedSize else "",
+                style = semiBoldEndTextStyle,
+                modifier = Modifier.fillMaxWidth()
+              )
+            } else {
+              BasicTextField(
+                value = uiState.fileSize,
+                onValueChange = onFileSizeChange,
+                singleLine = true,
+                visualTransformation = ThousandsSeparatorVisualTransformation,
+                textStyle = semiBoldEndTextStyle,
+                cursorBrush = cursorBrush,
+                keyboardOptions = FileSizeKeyboardOptions,
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .focusRequester(fileSizeFocusRequester)
+                  .onFocusChanged { focusState ->
+                    isFileSizeFocused = focusState.isFocused
+                  }
+                  .testTag("file_size_input")
+              )
+              if (unfocusedFileSizeDisplay.isNotEmpty()) {
+                Box(
+                  modifier = Modifier
+                    .fillMaxSize()
+                    .background(backgroundColor)
+                    .horizontalScroll(fileSizeScrollState)
+                    .clickable(indication = null, interactionSource = null) {
+                      fileSizeFocusRequester.requestFocus()
+                    },
+                  contentAlignment = Alignment.CenterEnd
+                ) {
+                  Text(
+                    text = unfocusedFileSizeDisplay,
+                    style = semiBoldEndTextStyle,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.widthIn(min = 82.dp)
                   )
                 }
-              } else Modifier
-            )
-            .padding(horizontal = 4.dp, vertical = 4.dp),
-          contentAlignment = Alignment.Center
-        ) {
-          if (uiState.calcMode == CalcMode.SIZE) {
-            Text(
-              text = if (result.hasResult) result.calculatedSize else "",
-              style = semiBoldCenterTextStyle
-            )
-          } else {
-            BasicTextField(
-              value = uiState.fileSize,
-              onValueChange = onFileSizeChange,
-              singleLine = true,
-              visualTransformation = ThousandsSeparatorVisualTransformation,
-              textStyle = semiBoldCenterTextStyle,
-              cursorBrush = cursorBrush,
-              keyboardOptions = DecimalNextKeyboardOptions,
+              }
+            }
+          }
+
+          Spacer(modifier = Modifier.width(8.dp))
+
+          // File size unit dropdown (fixed width: 74.dp to match speed unit slot for precise alignment)
+          Box(modifier = Modifier.width(74.dp)) {
+            Row(
               modifier = Modifier
                 .fillMaxWidth()
-                .testTag("file_size_input")
-            )
+                .height(40.dp)
+                .testTag("file_size_unit_dropdown")
+                .clickable { onSetFileSizeDropdownExpanded(true) }
+                .padding(horizontal = 2.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Text(
+                text = displayedFileSizeUnit.label,
+                style = mediumDropdownTextStyle,
+                maxLines = 1,
+                softWrap = false
+              )
+              Icon(
+                imageVector = Icons.Default.ArrowDropDown,
+                contentDescription = "Select file size unit",
+                tint = textColor,
+                modifier = Modifier.size(22.dp)
+              )
+            }
+
+            DropdownMenu(
+              expanded = uiState.isFileSizeDropdownExpanded,
+              onDismissRequest = { onSetFileSizeDropdownExpanded(false) }
+            ) {
+              FileSizeUnit.entries.forEach { unit ->
+                DropdownMenuItem(
+                  text = { Text(unit.label, fontWeight = FontWeight.Medium) },
+                  onClick = {
+                    onFileSizeUnitChange(unit)
+                  }
+                )
+              }
+            }
           }
         }
 
-        Spacer(modifier = Modifier.width(10.dp))
-
-        // File size unit dropdown (fixed width: 85.dp to match speed unit slot for precise alignment)
-        Box(modifier = Modifier.width(85.dp)) {
-          Row(
+        // Info button (ⓘ) on the right side of GB dropdown and aligned with the [copy] column
+        Box(
+          modifier = Modifier
+            .size(32.dp)
+            .align(Alignment.CenterEnd)
+        ) {
+          IconButton(
+            onClick = {
+              isFileSizeInfoExpanded = !isFileSizeInfoExpanded
+            },
             modifier = Modifier
-              .fillMaxWidth()
-              .height(40.dp)
-              .testTag("file_size_unit_dropdown")
-              .clickable { onSetFileSizeDropdownExpanded(true) }
-              .padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+              .size(32.dp)
+              .testTag("file_size_info_button")
           ) {
-            Text(
-              text = displayedFileSizeUnit.label,
-              style = mediumDropdownTextStyle
-            )
             Icon(
-              imageVector = Icons.Default.ArrowDropDown,
-              contentDescription = "Select file size unit",
-              tint = textColor,
-              modifier = Modifier.size(22.dp)
+              imageVector = Icons.Outlined.Info,
+              contentDescription = "you can use + (plus) for multiple file size",
+              tint = subtleIconTint,
+              modifier = Modifier.size(18.dp)
             )
           }
 
           DropdownMenu(
-            expanded = uiState.isFileSizeDropdownExpanded,
-            onDismissRequest = { onSetFileSizeDropdownExpanded(false) }
+            expanded = isFileSizeInfoExpanded,
+            onDismissRequest = { isFileSizeInfoExpanded = false }
           ) {
-            FileSizeUnit.entries.forEach { unit ->
-              DropdownMenuItem(
-                text = { Text(unit.label, fontWeight = FontWeight.Medium) },
-                onClick = {
-                  onFileSizeUnitChange(unit)
-                }
-              )
-            }
+            Text(
+              text = "you can use + (plus) for multiple file size",
+              style = tooltipTextStyle,
+              modifier = Modifier
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .testTag("file_size_info_tooltip")
+            )
           }
         }
       }
@@ -588,103 +697,114 @@ fun DLCalcScreen(
       Spacer(modifier = Modifier.height(14.dp))
 
       // 4. Speed row: Speed: _____ Mbps v
-      // Perfectly aligned with File size row (Label 96dp, Input 95dp, Spacer 10dp, Unit 85dp)
-      Row(
+      // Perfectly aligned with File size row (Label 88dp, Input 90dp, Spacer 8dp, Unit 74dp)
+      Box(
         modifier = Modifier
           .fillMaxWidth()
-          .height(48.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
+          .height(48.dp)
+          .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.CenterStart
       ) {
-        Text(
-          text = "Speed:",
-          style = regularTextStyle,
-          modifier = Modifier.width(96.dp)
-        )
-
-        // Underline input field (static fixed width: 95.dp)
-        Box(
+        Row(
           modifier = Modifier
-            .width(95.dp)
-            .height(40.dp)
-            .then(
-              if (showSpeedUnderline) {
-                Modifier.drawBehind {
-                  val strokeWidth = 1.5.dp.toPx()
-                  val y = size.height - strokeWidth / 2
-                  drawLine(
-                    color = underlineColor,
-                    start = Offset(0f, y),
-                    end = Offset(size.width, y),
-                    strokeWidth = strokeWidth
-                  )
-                }
-              } else Modifier
-            )
-            .padding(horizontal = 4.dp, vertical = 4.dp),
-          contentAlignment = Alignment.Center
+            .fillMaxWidth()
+            .height(48.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.Center
         ) {
-          if (uiState.calcMode == CalcMode.SPEED) {
-            Text(
-              text = if (result.hasResult) result.calculatedSpeed else "",
-              style = semiBoldCenterTextStyle
-            )
-          } else {
-            BasicTextField(
-              value = uiState.speed,
-              onValueChange = onSpeedChange,
-              singleLine = true,
-              visualTransformation = ThousandsSeparatorVisualTransformation,
-              textStyle = semiBoldCenterTextStyle,
-              cursorBrush = cursorBrush,
-              keyboardOptions = DecimalDoneKeyboardOptions,
-              keyboardActions = KeyboardActions(
-                onDone = { focusManager.clearFocus() }
-              ),
+          Text(
+            text = "Speed:",
+            style = regularTextStyle,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.width(88.dp)
+          )
+
+          // Underline input field (static fixed width: 90.dp)
+          Box(
+            modifier = Modifier
+              .width(90.dp)
+              .height(40.dp)
+              .then(
+                if (showSpeedUnderline) {
+                  Modifier.drawBehind {
+                    val strokeWidth = 1.5.dp.toPx()
+                    val y = size.height - strokeWidth / 2
+                    drawLine(
+                      color = underlineColor,
+                      start = Offset(0f, y),
+                      end = Offset(size.width, y),
+                      strokeWidth = strokeWidth
+                    )
+                  }
+                } else Modifier
+              )
+              .padding(horizontal = 4.dp, vertical = 4.dp),
+            contentAlignment = Alignment.CenterEnd
+          ) {
+            if (uiState.calcMode == CalcMode.SPEED) {
+              Text(
+                text = if (result.hasResult) result.calculatedSpeed else "",
+                style = semiBoldEndTextStyle,
+                modifier = Modifier.fillMaxWidth()
+              )
+            } else {
+              BasicTextField(
+                value = uiState.speed,
+                onValueChange = onSpeedChange,
+                singleLine = true,
+                visualTransformation = ThousandsSeparatorVisualTransformation,
+                textStyle = semiBoldEndTextStyle,
+                cursorBrush = cursorBrush,
+                keyboardOptions = DecimalDoneKeyboardOptions,
+                keyboardActions = doneKeyboardActions,
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .testTag("speed_input")
+              )
+            }
+          }
+
+          Spacer(modifier = Modifier.width(8.dp))
+
+          // Speed unit dropdown (static fixed width: 74.dp)
+          Box(modifier = Modifier.width(74.dp)) {
+            Row(
               modifier = Modifier
                 .fillMaxWidth()
-                .testTag("speed_input")
-            )
-          }
-        }
-
-        Spacer(modifier = Modifier.width(10.dp))
-
-        // Speed unit dropdown (static fixed width: 85.dp)
-        Box(modifier = Modifier.width(85.dp)) {
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .height(40.dp)
-              .testTag("speed_unit_dropdown")
-              .clickable { onSetSpeedDropdownExpanded(true) }
-              .padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-          ) {
-            Text(
-              text = displayedSpeedUnit.label,
-              style = mediumDropdownTextStyle
-            )
-            Icon(
-              imageVector = Icons.Default.ArrowDropDown,
-              contentDescription = "Select speed unit",
-              tint = textColor,
-              modifier = Modifier.size(22.dp)
-            )
-          }
-
-          DropdownMenu(
-            expanded = uiState.isSpeedDropdownExpanded,
-            onDismissRequest = { onSetSpeedDropdownExpanded(false) }
-          ) {
-            SpeedUnit.entries.forEach { unit ->
-              DropdownMenuItem(
-                text = { Text(unit.label, fontWeight = FontWeight.Medium) },
-                onClick = {
-                  onSpeedUnitChange(unit)
-                }
+                .height(40.dp)
+                .testTag("speed_unit_dropdown")
+                .clickable { onSetSpeedDropdownExpanded(true) }
+                .padding(horizontal = 2.dp),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Text(
+                text = displayedSpeedUnit.label,
+                style = mediumDropdownTextStyle,
+                maxLines = 1,
+                softWrap = false
               )
+              Icon(
+                imageVector = Icons.Default.ArrowDropDown,
+                contentDescription = "Select speed unit",
+                tint = textColor,
+                modifier = Modifier.size(22.dp)
+              )
+            }
+
+            DropdownMenu(
+              expanded = uiState.isSpeedDropdownExpanded,
+              onDismissRequest = { onSetSpeedDropdownExpanded(false) }
+            ) {
+              SpeedUnit.entries.forEach { unit ->
+                DropdownMenuItem(
+                  text = { Text(unit.label, fontWeight = FontWeight.Medium) },
+                  onClick = {
+                    onSpeedUnitChange(unit)
+                  }
+                )
+              }
             }
           }
         }
@@ -707,7 +827,7 @@ fun DLCalcScreen(
             containerColor = if (uiState.isDarkMode) Color.White else Color.Black,
             contentColor = if (uiState.isDarkMode) Color.Black else Color.White
           ),
-          shape = RoundedCornerShape(12.dp),
+          shape = ActionButtonShape,
           modifier = Modifier
             .width(105.dp)
             .height(46.dp)
@@ -715,11 +835,7 @@ fun DLCalcScreen(
         ) {
           Text(
             text = if (uiState.isDarkMode) "Dark" else "Light",
-            style = TextStyle(
-              fontSize = 19.sp,
-              fontWeight = FontWeight.Bold,
-              color = if (uiState.isDarkMode) Color.Black else Color.White
-            )
+            style = if (uiState.isDarkMode) BlackButtonTextStyle else WhiteButtonTextStyle
           )
         }
 
@@ -728,14 +844,12 @@ fun DLCalcScreen(
         // Clear all button (red rounded box with white text "Clear all")
         // Does not close keyboard or deselect input (Requirement 1)
         Button(
-          onClick = {
-            onClearAll()
-          },
+          onClick = onClearAll,
           colors = ButtonDefaults.buttonColors(
             containerColor = ClearRedColor,
             contentColor = Color.White
           ),
-          shape = RoundedCornerShape(12.dp),
+          shape = ActionButtonShape,
           modifier = Modifier
             .width(135.dp)
             .height(46.dp)
@@ -743,11 +857,7 @@ fun DLCalcScreen(
         ) {
           Text(
             text = "Clear all",
-            style = TextStyle(
-              fontSize = 19.sp,
-              fontWeight = FontWeight.Bold,
-              color = Color.White
-            )
+            style = WhiteButtonTextStyle
           )
         }
       }
@@ -759,31 +869,14 @@ fun DLCalcScreen(
 private fun TimeBreakdownRow(
   value: String,
   unit: String,
-  textColor: Color,
+  valueTextStyle: TextStyle,
+  unitTextStyle: TextStyle,
+  cursorBrush: SolidColor,
   underlineColor: Color,
   showUnderline: Boolean,
   isEditable: Boolean,
   onValueChange: (String) -> Unit = {}
 ) {
-  val cursorBrush = remember(textColor) { SolidColor(textColor) }
-  val boldEndTextStyle = remember(textColor) {
-    TextStyle(
-      fontFamily = FontFamily.SansSerif,
-      fontWeight = FontWeight.Bold,
-      fontSize = 20.sp,
-      color = textColor,
-      textAlign = TextAlign.End
-    )
-  }
-  val mediumUnitTextStyle = remember(textColor) {
-    TextStyle(
-      fontFamily = FontFamily.SansSerif,
-      fontWeight = FontWeight.Medium,
-      fontSize = 20.sp,
-      color = textColor
-    )
-  }
-
   Row(
     modifier = Modifier
       .width(235.dp)
@@ -817,7 +910,7 @@ private fun TimeBreakdownRow(
           onValueChange = onValueChange,
           singleLine = true,
           visualTransformation = ThousandsSeparatorVisualTransformation,
-          textStyle = boldEndTextStyle,
+          textStyle = valueTextStyle,
           cursorBrush = cursorBrush,
           keyboardOptions = DecimalNextKeyboardOptions,
           modifier = Modifier
@@ -827,7 +920,7 @@ private fun TimeBreakdownRow(
       } else {
         Text(
           text = value,
-          style = boldEndTextStyle,
+          style = valueTextStyle,
           modifier = Modifier.fillMaxWidth()
         )
       }
@@ -835,7 +928,7 @@ private fun TimeBreakdownRow(
     Spacer(modifier = Modifier.width(12.dp))
     Text(
       text = unit,
-      style = mediumUnitTextStyle
+      style = unitTextStyle
     )
   }
 }

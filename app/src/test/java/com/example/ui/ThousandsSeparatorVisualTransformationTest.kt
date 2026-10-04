@@ -76,4 +76,38 @@ class ThousandsSeparatorVisualTransformationTest {
         assertEquals("10,000", DownloadCalculator.formatWithCommas(10000L))
         assertEquals("1,234,567", DownloadCalculator.formatWithCommas(1234567L))
     }
+
+    @Test
+    fun testPlusExpressionsFormatting() {
+        val simplePlus = ThousandsSeparatorVisualTransformation.filter(AnnotatedString("40+10+50"))
+        assertEquals("40+10+50", simplePlus.text.text)
+
+        val thousandsPlus = ThousandsSeparatorVisualTransformation.filter(AnnotatedString("1000+2500.5+50"))
+        assertEquals("1,000+2,500.5+50", thousandsPlus.text.text)
+    }
+
+    @Test
+    fun testFileSizeVisualTransformationFocusedVsUnfocused() {
+        // When focused: hides "=result", keeps "5+5+5"
+        val focusedResult = FileSizeVisualTransformation.Focused.filter(AnnotatedString("5+5+5"))
+        assertEquals("5+5+5", focusedResult.text.text)
+
+        // When unfocused: shows "=result", e.g. "5+5+5=15"
+        val unfocusedResult = FileSizeVisualTransformation.Unfocused.filter(AnnotatedString("5+5+5"))
+        assertEquals("5+5+5=15", unfocusedResult.text.text)
+        assertEquals(5, unfocusedResult.offsetMapping.originalToTransformed(5))
+        assertEquals(5, unfocusedResult.offsetMapping.transformedToOriginal(8))
+
+        // Single number without addition: no "=result" even when unfocused
+        val singleUnfocused = FileSizeVisualTransformation.Unfocused.filter(AnnotatedString("15"))
+        assertEquals("15", singleUnfocused.text.text)
+
+        // Trailing plus with only 1 number ("5+"): no "=result"
+        val trailingSinglePlus = FileSizeVisualTransformation.Unfocused.filter(AnnotatedString("5+"))
+        assertEquals("5+", trailingSinglePlus.text.text)
+
+        // Thousands with addition when unfocused
+        val thousandsUnfocused = FileSizeVisualTransformation.Unfocused.filter(AnnotatedString("1000+500"))
+        assertEquals("1,000+500=1,500", thousandsUnfocused.text.text)
+    }
 }

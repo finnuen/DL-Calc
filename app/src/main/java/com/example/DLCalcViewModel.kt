@@ -1,5 +1,6 @@
 package com.example
 
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -17,7 +18,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 private val DECIMAL_REGEX = Regex("""^\d*(\.\d*)?$""")
+private val FILE_SIZE_EXPR_REGEX = Regex("""^\d*(\.\d*)?(\+\d*(\.\d*)?)*$""")
 
+@Immutable
 data class DLCalcUiState(
     val fileSize: String = "",
     val fileSizeUnit: FileSizeUnit = FileSizeUnit.GB,
@@ -41,6 +44,14 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
 
     // Cached and reactive calculation derived flow to prevent UI recomposition recalculations
     val calculationResult: StateFlow<DownloadTimeResult> = _uiState
+        .distinctUntilChanged { old, new ->
+            old.fileSize == new.fileSize &&
+                old.fileSizeUnit == new.fileSizeUnit &&
+                old.speed == new.speed &&
+                old.speedUnit == new.speedUnit &&
+                old.timeSeconds == new.timeSeconds &&
+                old.calcMode == new.calcMode
+        }
         .map { state ->
             DownloadCalculator.calculate(
                 fileSizeStr = state.fileSize,
@@ -55,7 +66,7 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
-            initialValue = DownloadTimeResult(hasResult = false)
+            initialValue = DownloadTimeResult.Empty
         )
 
     init {
@@ -131,11 +142,20 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
                state.seconds.isNotEmpty()
     }
 
+    private fun parseDoubleFast(str: String): Double {
+        if (str.isEmpty()) return 0.0
+        val clean = if (str.indexOf(',') >= 0) str.replace(",", "") else str
+        return clean.trim().toDoubleOrNull() ?: 0.0
+    }
+
+    private fun stripCommas(str: String): String =
+        if (str.indexOf(',') >= 0) str.replace(",", "") else str
+
     private fun recalculateTotalSeconds(days: String, hours: String, minutes: String, seconds: String): String {
-        val d = days.trim().replace(",", "").toDoubleOrNull() ?: 0.0
-        val h = hours.trim().replace(",", "").toDoubleOrNull() ?: 0.0
-        val m = minutes.trim().replace(",", "").toDoubleOrNull() ?: 0.0
-        val s = seconds.trim().replace(",", "").toDoubleOrNull() ?: 0.0
+        val d = parseDoubleFast(days)
+        val h = parseDoubleFast(hours)
+        val m = parseDoubleFast(minutes)
+        val s = parseDoubleFast(seconds)
         val total = d * 86400.0 + h * 3600.0 + m * 60.0 + s
         return if (total > 0.0) {
             if (total % 1.0 == 0.0) total.toLong().toString() else total.toString()
@@ -145,17 +165,32 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
     }
 
     fun onFileSizeChange(newSize: String) {
-        val clean = newSize.replace(",", "")
-        if (clean.isEmpty() || clean.matches(DECIMAL_REGEX)) {
-            var newMode = _uiState.value.calcMode
+        var clean = if (newSize.indexOf('=') >= 0) newSize.substringBefore('=') else newSize
+        if (clean.indexOf(',') >= 0) {
+            clean = clean.replace(",", "")
+        }
+        if (clean.indexOf(' ') >= 0) {
+            clean = clean.replace(" ", "")
+        }
+        while (clean.indexOf("++") >= 0) {
+            clean = clean.replace("++", "+")
+        }
+        if (clean.startsWith("+")) {
+            clean = clean.removePrefix("+")
+        }
+        val current = _uiState.value
+        if (clean == current.fileSize) return
+        val isValidExpr = clean.isEmpty() || clean.matches(FILE_SIZE_EXPR_REGEX)
+        if (isValidExpr) {
+            var newMode = current.calcMode
             if (newMode == CalcMode.NONE && clean.isNotEmpty()) {
-                if (_uiState.value.speed.isNotEmpty()) {
+                if (current.speed.isNotEmpty()) {
                     newMode = CalcMode.TIME
-                } else if (hasAnyTimeInput(_uiState.value)) {
+                } else if (hasAnyTimeInput(current)) {
                     newMode = CalcMode.SPEED
                 }
             }
-            val updated = _uiState.value.copy(
+            val updated = current.copy(
                 fileSize = clean,
                 calcMode = newMode
             )
@@ -174,21 +209,25 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
     }
 
     fun setFileSizeDropdownExpanded(expanded: Boolean) {
-        _uiState.value = _uiState.value.copy(isFileSizeDropdownExpanded = expanded)
+        if (_uiState.value.isFileSizeDropdownExpanded != expanded) {
+            _uiState.value = _uiState.value.copy(isFileSizeDropdownExpanded = expanded)
+        }
     }
 
     fun onSpeedChange(newSpeed: String) {
-        val clean = newSpeed.replace(",", "")
+        val clean = stripCommas(newSpeed)
+        val current = _uiState.value
+        if (clean == current.speed) return
         if (clean.isEmpty() || clean.matches(DECIMAL_REGEX)) {
-            var newMode = _uiState.value.calcMode
+            var newMode = current.calcMode
             if (newMode == CalcMode.NONE && clean.isNotEmpty()) {
-                if (_uiState.value.fileSize.isNotEmpty()) {
+                if (current.fileSize.isNotEmpty()) {
                     newMode = CalcMode.TIME
-                } else if (hasAnyTimeInput(_uiState.value)) {
+                } else if (hasAnyTimeInput(current)) {
                     newMode = CalcMode.SIZE
                 }
             }
-            val updated = _uiState.value.copy(
+            val updated = current.copy(
                 speed = clean,
                 calcMode = newMode
             )
@@ -207,27 +246,31 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
     }
 
     fun setSpeedDropdownExpanded(expanded: Boolean) {
-        _uiState.value = _uiState.value.copy(isSpeedDropdownExpanded = expanded)
+        if (_uiState.value.isSpeedDropdownExpanded != expanded) {
+            _uiState.value = _uiState.value.copy(isSpeedDropdownExpanded = expanded)
+        }
     }
 
     fun onDaysChange(newDays: String) {
-        val clean = newDays.replace(",", "")
+        val clean = stripCommas(newDays)
+        val current = _uiState.value
+        if (clean == current.days) return
         if (clean.isEmpty() || clean.matches(DECIMAL_REGEX)) {
             val newTotalSeconds = recalculateTotalSeconds(
                 days = clean,
-                hours = _uiState.value.hours,
-                minutes = _uiState.value.minutes,
-                seconds = _uiState.value.seconds
+                hours = current.hours,
+                minutes = current.minutes,
+                seconds = current.seconds
             )
-            var newMode = _uiState.value.calcMode
+            var newMode = current.calcMode
             if (newMode == CalcMode.NONE && (clean.isNotEmpty() || newTotalSeconds.isNotEmpty())) {
-                if (_uiState.value.fileSize.isNotEmpty()) {
+                if (current.fileSize.isNotEmpty()) {
                     newMode = CalcMode.SPEED
-                } else if (_uiState.value.speed.isNotEmpty()) {
+                } else if (current.speed.isNotEmpty()) {
                     newMode = CalcMode.SIZE
                 }
             }
-            val updated = _uiState.value.copy(
+            val updated = current.copy(
                 days = clean,
                 timeSeconds = newTotalSeconds,
                 calcMode = newMode
@@ -238,23 +281,25 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
     }
 
     fun onHoursChange(newHours: String) {
-        val clean = newHours.replace(",", "")
+        val clean = stripCommas(newHours)
+        val current = _uiState.value
+        if (clean == current.hours) return
         if (clean.isEmpty() || clean.matches(DECIMAL_REGEX)) {
             val newTotalSeconds = recalculateTotalSeconds(
-                days = _uiState.value.days,
+                days = current.days,
                 hours = clean,
-                minutes = _uiState.value.minutes,
-                seconds = _uiState.value.seconds
+                minutes = current.minutes,
+                seconds = current.seconds
             )
-            var newMode = _uiState.value.calcMode
+            var newMode = current.calcMode
             if (newMode == CalcMode.NONE && (clean.isNotEmpty() || newTotalSeconds.isNotEmpty())) {
-                if (_uiState.value.fileSize.isNotEmpty()) {
+                if (current.fileSize.isNotEmpty()) {
                     newMode = CalcMode.SPEED
-                } else if (_uiState.value.speed.isNotEmpty()) {
+                } else if (current.speed.isNotEmpty()) {
                     newMode = CalcMode.SIZE
                 }
             }
-            val updated = _uiState.value.copy(
+            val updated = current.copy(
                 hours = clean,
                 timeSeconds = newTotalSeconds,
                 calcMode = newMode
@@ -265,23 +310,25 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
     }
 
     fun onMinutesChange(newMinutes: String) {
-        val clean = newMinutes.replace(",", "")
+        val clean = stripCommas(newMinutes)
+        val current = _uiState.value
+        if (clean == current.minutes) return
         if (clean.isEmpty() || clean.matches(DECIMAL_REGEX)) {
             val newTotalSeconds = recalculateTotalSeconds(
-                days = _uiState.value.days,
-                hours = _uiState.value.hours,
+                days = current.days,
+                hours = current.hours,
                 minutes = clean,
-                seconds = _uiState.value.seconds
+                seconds = current.seconds
             )
-            var newMode = _uiState.value.calcMode
+            var newMode = current.calcMode
             if (newMode == CalcMode.NONE && (clean.isNotEmpty() || newTotalSeconds.isNotEmpty())) {
-                if (_uiState.value.fileSize.isNotEmpty()) {
+                if (current.fileSize.isNotEmpty()) {
                     newMode = CalcMode.SPEED
-                } else if (_uiState.value.speed.isNotEmpty()) {
+                } else if (current.speed.isNotEmpty()) {
                     newMode = CalcMode.SIZE
                 }
             }
-            val updated = _uiState.value.copy(
+            val updated = current.copy(
                 minutes = clean,
                 timeSeconds = newTotalSeconds,
                 calcMode = newMode
@@ -292,23 +339,25 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
     }
 
     fun onSecondsChange(newSeconds: String) {
-        val clean = newSeconds.replace(",", "")
+        val clean = stripCommas(newSeconds)
+        val current = _uiState.value
+        if (clean == current.seconds) return
         if (clean.isEmpty() || clean.matches(DECIMAL_REGEX)) {
             val newTotalSeconds = recalculateTotalSeconds(
-                days = _uiState.value.days,
-                hours = _uiState.value.hours,
-                minutes = _uiState.value.minutes,
+                days = current.days,
+                hours = current.hours,
+                minutes = current.minutes,
                 seconds = clean
             )
-            var newMode = _uiState.value.calcMode
+            var newMode = current.calcMode
             if (newMode == CalcMode.NONE && (clean.isNotEmpty() || newTotalSeconds.isNotEmpty())) {
-                if (_uiState.value.fileSize.isNotEmpty()) {
+                if (current.fileSize.isNotEmpty()) {
                     newMode = CalcMode.SPEED
-                } else if (_uiState.value.speed.isNotEmpty()) {
+                } else if (current.speed.isNotEmpty()) {
                     newMode = CalcMode.SIZE
                 }
             }
-            val updated = _uiState.value.copy(
+            val updated = current.copy(
                 seconds = clean,
                 timeSeconds = newTotalSeconds,
                 calcMode = newMode
@@ -319,19 +368,25 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
     }
 
     fun onTimeSecondsChange(newTime: String) {
-        val clean = newTime.replace(",", "")
+        val clean = stripCommas(newTime)
+        val current = _uiState.value
+        if (clean == current.timeSeconds) return
         if (clean.isEmpty() || clean.matches(DECIMAL_REGEX)) {
-            var newMode = _uiState.value.calcMode
+            var newMode = current.calcMode
             if (newMode == CalcMode.NONE && clean.isNotEmpty()) {
-                if (_uiState.value.fileSize.isNotEmpty()) {
+                if (current.fileSize.isNotEmpty()) {
                     newMode = CalcMode.SPEED
-                } else if (_uiState.value.speed.isNotEmpty()) {
+                } else if (current.speed.isNotEmpty()) {
                     newMode = CalcMode.SIZE
                 }
             }
 
             val secVal = clean.trim().toDoubleOrNull()
-            val (dStr, hStr, mStr, sStr) = if (secVal != null && secVal > 0.0) {
+            var dStr = ""
+            var hStr = ""
+            var mStr = ""
+            var sStr = ""
+            if (secVal != null && secVal > 0.0) {
                 val totalSec = Math.round(secVal)
                 val d = totalSec / 86400
                 val remD = totalSec % 86400
@@ -339,17 +394,13 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
                 val remH = remD % 3600
                 val m = remH / 60
                 val s = remH % 60
-                listOf(
-                    if (d > 0) d.toString() else "",
-                    if (h > 0) h.toString() else "",
-                    if (m > 0) m.toString() else "",
-                    if (s > 0) s.toString() else ""
-                )
-            } else {
-                listOf("", "", "", "")
+                if (d > 0) dStr = d.toString()
+                if (h > 0) hStr = h.toString()
+                if (m > 0) mStr = m.toString()
+                if (s > 0) sStr = s.toString()
             }
 
-            val updated = _uiState.value.copy(
+            val updated = current.copy(
                 timeSeconds = clean,
                 days = dStr,
                 hours = hStr,
@@ -363,19 +414,25 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
     }
 
     fun clearFileSize() {
-        val updated = _uiState.value.copy(fileSize = "")
+        val current = _uiState.value
+        if (current.fileSize.isEmpty()) return
+        val updated = current.copy(fileSize = "")
         _uiState.value = updated
         persistCurrentState(updated, immediate = true)
     }
 
     fun clearSpeed() {
-        val updated = _uiState.value.copy(speed = "")
+        val current = _uiState.value
+        if (current.speed.isEmpty()) return
+        val updated = current.copy(speed = "")
         _uiState.value = updated
         persistCurrentState(updated, immediate = true)
     }
 
     fun clearTimeSeconds() {
-        val updated = _uiState.value.copy(
+        val current = _uiState.value
+        if (!hasAnyTimeInput(current)) return
+        val updated = current.copy(
             timeSeconds = "",
             days = "",
             hours = "",
@@ -387,7 +444,11 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
     }
 
     fun clearAll() {
-        val updated = _uiState.value.copy(
+        val current = _uiState.value
+        if (current.fileSize.isEmpty() && current.speed.isEmpty() && !hasAnyTimeInput(current) && current.calcMode == CalcMode.NONE) {
+            return
+        }
+        val updated = current.copy(
             fileSize = "",
             speed = "",
             days = "",

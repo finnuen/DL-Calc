@@ -132,4 +132,24 @@ class DLCalcViewModelTest {
         viewModel.onDaysChange("1,000")
         assertEquals("1000", viewModel.uiState.value.days)
     }
+
+    @Test
+    fun testFileSizeAdditionCalculation() = runTest {
+        viewModel.onFileSizeChange("50+40")
+        assertEquals("50+40", viewModel.uiState.value.fileSize)
+
+        // Moving to another field keeps 50+40 as-is while calculating with the sum
+        viewModel.onSpeedChange("100")
+        assertEquals("50+40", viewModel.uiState.value.fileSize)
+        assertEquals(CalcMode.TIME, viewModel.uiState.value.calcMode)
+
+        // Deleting first number ("+40") or middle number ("40++50") normalizes cleanly so numbers are always deletable
+        viewModel.onFileSizeChange("+40")
+        assertEquals("40", viewModel.uiState.value.fileSize)
+        viewModel.onFileSizeChange("40+10+50")
+        viewModel.onFileSizeChange("40++50")
+        assertEquals("40+50", viewModel.uiState.value.fileSize)
+        viewModel.onFileSizeChange("")
+        assertEquals("", viewModel.uiState.value.fileSize)
+    }
 }

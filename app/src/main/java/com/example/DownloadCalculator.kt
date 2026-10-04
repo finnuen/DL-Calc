@@ -1,5 +1,6 @@
 package com.example
 
+import androidx.compose.runtime.Immutable
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.text.NumberFormat
@@ -35,6 +36,7 @@ enum class CalcMode {
     SIZE
 }
 
+@Immutable
 data class DownloadTimeResult(
     val hasResult: Boolean,
     val isBelowOneSecond: Boolean = false,
@@ -43,6 +45,10 @@ data class DownloadTimeResult(
     val minutes: Long = 0,
     val seconds: Long = 0,
     val totalSeconds: Long = 0,
+    val formattedDays: String = "",
+    val formattedHours: String = "",
+    val formattedMinutes: String = "",
+    val formattedSeconds: String = "",
     val formattedTotalSeconds: String = "",
     val calculatedSpeed: String = "",
     val calculatedSpeedUnit: SpeedUnit? = null,
@@ -60,17 +66,24 @@ data class DownloadTimeResult(
         if (!hasResult && totalSeconds <= 0 && !isBelowOneSecond) return ""
         if (isBelowOneSecond) return "< 1 second"
 
-        val parts = mutableListOf<String>()
-        if (days > 0) parts.add("$days ${if (days == 1L) "day" else "days"}")
-        if (hours > 0) parts.add("$hours ${if (hours == 1L) "hour" else "hours"}")
-        if (minutes > 0) parts.add("$minutes ${if (minutes == 1L) "minute" else "minutes"}")
-        if (seconds > 0) parts.add("$seconds ${if (seconds == 1L) "second" else "seconds"}")
-
-        return if (parts.isEmpty()) {
-            "0 seconds"
-        } else {
-            parts.joinToString(", ")
+        val sb = StringBuilder()
+        if (days > 0) {
+            sb.append(days).append(if (days == 1L) " day" else " days")
         }
+        if (hours > 0) {
+            if (sb.isNotEmpty()) sb.append(", ")
+            sb.append(hours).append(if (hours == 1L) " hour" else " hours")
+        }
+        if (minutes > 0) {
+            if (sb.isNotEmpty()) sb.append(", ")
+            sb.append(minutes).append(if (minutes == 1L) " minute" else " minutes")
+        }
+        if (seconds > 0) {
+            if (sb.isNotEmpty()) sb.append(", ")
+            sb.append(seconds).append(if (seconds == 1L) " second" else " seconds")
+        }
+
+        return if (sb.isEmpty()) "0 seconds" else sb.toString()
     }
 
     /**
@@ -80,6 +93,10 @@ data class DownloadTimeResult(
     fun toSecondsRawString(): String {
         if (!hasResult && totalSeconds <= 0 && !isBelowOneSecond) return ""
         return if (isBelowOneSecond) "1<" else totalSeconds.toString()
+    }
+
+    companion object {
+        val Empty = DownloadTimeResult(hasResult = false)
     }
 }
 
@@ -117,8 +134,8 @@ object DownloadCalculator {
             }
         } else {
             val kbPerSec = bytesPerSec / 1024.0
-            val mbPerSec = bytesPerSec / (1024.0 * 1024.0)
             if (kbPerSec >= 1024.0) {
+                val mbPerSec = kbPerSec / 1024.0
                 Pair(mbPerSec, SpeedUnit.MB_S)
             } else {
                 Pair(kbPerSec, SpeedUnit.KB_S)
@@ -143,12 +160,13 @@ object DownloadCalculator {
 
     private fun buildTimeBreakdown(totalSecondsExact: Double): DownloadTimeResult {
         if (totalSecondsExact.isNaN() || totalSecondsExact.isInfinite() || totalSecondsExact <= 0.0) {
-            return DownloadTimeResult(hasResult = false)
+            return DownloadTimeResult.Empty
         }
         if (totalSecondsExact < 1.0) {
             return DownloadTimeResult(
                 hasResult = true,
                 isBelowOneSecond = true,
+                formattedSeconds = "1<",
                 formattedTotalSeconds = "1<"
             )
         }
@@ -164,11 +182,6 @@ object DownloadCalculator {
         val remAfterHours = remAfterDays % 3600
         val minutes = remAfterHours / 60
         val seconds = remAfterHours % 60
-        val formattedSeconds = try {
-            numberFormatter.get()?.format(totalSeconds) ?: totalSeconds.toString()
-        } catch (e: Exception) {
-            totalSeconds.toString()
-        }
         return DownloadTimeResult(
             hasResult = true,
             isBelowOneSecond = false,
@@ -177,7 +190,11 @@ object DownloadCalculator {
             minutes = minutes,
             seconds = seconds,
             totalSeconds = totalSeconds,
-            formattedTotalSeconds = formattedSeconds
+            formattedDays = if (days > 0L) formatWithCommas(days) else "",
+            formattedHours = if (hours > 0L) formatWithCommas(hours) else "",
+            formattedMinutes = if (minutes > 0L) formatWithCommas(minutes) else "",
+            formattedSeconds = if (seconds > 0L) formatWithCommas(seconds) else "",
+            formattedTotalSeconds = formatWithCommas(totalSeconds)
         )
     }
 
@@ -192,16 +209,123 @@ object DownloadCalculator {
 
     private fun cleanNumericString(str: String): String {
         val trimmed = str.trim()
-        if (!trimmed.contains(',')) return trimmed
         val commaIndex = trimmed.indexOf(',')
-        val isThousandsComma = trimmed.count { it == ',' } > 1 ||
-            trimmed.contains('.') ||
+        if (commaIndex < 0) return trimmed
+        var commaCount = 0
+        var hasDot = false
+        for (i in 0 until trimmed.length) {
+            when (trimmed[i]) {
+                ',' -> commaCount++
+                '.' -> hasDot = true
+            }
+        }
+        val isThousandsComma = commaCount > 1 ||
+            hasDot ||
             (trimmed.length - 1 - commaIndex == 3 && commaIndex > 0)
         return if (isThousandsComma) {
             trimmed.replace(",", "")
         } else {
             trimmed.replace(',', '.')
         }
+    }
+
+    fun evaluateFileSizeExpression(str: String): Double? {
+        val len = str.length
+        if (len == 0) return null
+        if (str.indexOf('+') < 0) {
+            return cleanNumericString(str).toDoubleOrNull()
+        }
+        var sum = 0.0
+        var hasValidPart = false
+        var start = 0
+        while (start <= len) {
+            val plusIdx = str.indexOf('+', start)
+            val end = if (plusIdx < 0) len else plusIdx
+            if (end > start) {
+                val segment = str.substring(start, end).trim()
+                if (segment.isNotEmpty()) {
+                    val value = cleanNumericString(segment).toDoubleOrNull() ?: return null
+                    if (value < 0.0 || value.isNaN() || value.isInfinite()) return null
+                    sum += value
+                    hasValidPart = true
+                }
+            }
+            if (plusIdx < 0) break
+            start = plusIdx + 1
+        }
+        return if (hasValidPart) sum else null
+    }
+
+    fun resolveFileSizeString(str: String): String {
+        val trimmed = str.trim()
+        if (!trimmed.contains('+')) return trimmed
+        val parts = trimmed.split('+')
+        var sum = java.math.BigDecimal.ZERO
+        var validPartCount = 0
+        for (part in parts) {
+            val p = part.trim()
+            if (p.isEmpty()) continue
+            val cleaned = cleanNumericString(p)
+            val bd = cleaned.toBigDecimalOrNull() ?: return trimmed
+            if (bd < java.math.BigDecimal.ZERO) return trimmed
+            sum = sum.add(bd)
+            validPartCount++
+        }
+        if (validPartCount == 0) return ""
+        val stripped = sum.stripTrailingZeros()
+        return if (stripped.scale() <= 0) {
+            stripped.toBigInteger().toString()
+        } else {
+            stripped.toPlainString()
+        }
+    }
+
+    /**
+     * Returns the "=result" suffix (e.g. "=15" for "5+5+5", or "=1,500" for "1000+500")
+     * when the input contains an addition expression with at least 2 numeric terms.
+     */
+    fun formatFileSizeResultSuffix(str: String): String {
+        val len = str.length
+        val firstPlus = str.indexOf('+')
+        if (firstPlus <= 0 || firstPlus >= len - 1) {
+            // Quick check if there cannot possibly be at least 2 non-empty segments
+            if (firstPlus < 0) return ""
+        }
+        var sum = java.math.BigDecimal.ZERO
+        var validPartCount = 0
+        var start = 0
+        while (start <= len) {
+            val plusIdx = str.indexOf('+', start)
+            val end = if (plusIdx < 0) len else plusIdx
+            if (end > start) {
+                val p = str.substring(start, end).trim()
+                if (p.isNotEmpty()) {
+                    val cleaned = cleanNumericString(p)
+                    val bd = cleaned.toBigDecimalOrNull() ?: return ""
+                    if (bd < java.math.BigDecimal.ZERO) return ""
+                    sum = sum.add(bd)
+                    validPartCount++
+                }
+            }
+            if (plusIdx < 0) break
+            start = plusIdx + 1
+        }
+        if (validPartCount < 2) return ""
+        val stripped = sum.stripTrailingZeros()
+        val rawResult = if (stripped.scale() <= 0) {
+            val exactLong = stripped.toBigInteger().toLong()
+            formatWithCommas(exactLong)
+        } else {
+            val plain = stripped.toPlainString()
+            val dotIdx = plain.indexOf('.')
+            val intPart = if (dotIdx >= 0) plain.substring(0, dotIdx).toLongOrNull() else plain.toLongOrNull()
+            if (intPart != null && dotIdx >= 0) {
+                formatWithCommas(intPart) + plain.substring(dotIdx)
+            } else {
+                plain
+            }
+        }
+        return "=$rawResult"
     }
 
     fun calculate(
@@ -212,16 +336,15 @@ object DownloadCalculator {
         timeStr: String = "",
         mode: CalcMode = CalcMode.TIME
     ): DownloadTimeResult {
-        val cleanSizeStr = cleanNumericString(fileSizeStr)
         val cleanSpeedStr = cleanNumericString(speedStr)
         val cleanTimeStr = cleanNumericString(timeStr)
 
         when (mode) {
             CalcMode.TIME -> {
-                if (cleanSizeStr.isEmpty() || cleanSpeedStr.isEmpty()) {
+                if (fileSizeStr.isBlank() || cleanSpeedStr.isEmpty()) {
                     return DownloadTimeResult(hasResult = false, mode = mode)
                 }
-                val size = cleanSizeStr.toDoubleOrNull() ?: return DownloadTimeResult(hasResult = false, mode = mode)
+                val size = evaluateFileSizeExpression(fileSizeStr) ?: return DownloadTimeResult(hasResult = false, mode = mode)
                 val speed = cleanSpeedStr.toDoubleOrNull() ?: return DownloadTimeResult(hasResult = false, mode = mode)
                 if (size <= 0.0 || speed <= 0.0 || size.isNaN() || speed.isNaN() || size.isInfinite() || speed.isInfinite()) {
                     return DownloadTimeResult(hasResult = false, mode = mode)
@@ -242,10 +365,10 @@ object DownloadCalculator {
                     DownloadTimeResult(hasResult = false)
                 }
 
-                if (cleanSizeStr.isEmpty() || cleanTimeStr.isEmpty()) {
+                if (fileSizeStr.isBlank() || cleanTimeStr.isEmpty()) {
                     return timeBreakdown.copy(hasResult = false, mode = mode)
                 }
-                val size = cleanSizeStr.toDoubleOrNull()
+                val size = evaluateFileSizeExpression(fileSizeStr)
                     ?: return timeBreakdown.copy(hasResult = false, mode = mode)
                 if (timeSeconds == null || size <= 0.0 || timeSeconds <= 0.0 || size.isNaN() || timeSeconds.isNaN() || size.isInfinite() || timeSeconds.isInfinite()) {
                     return timeBreakdown.copy(hasResult = false, mode = mode)
