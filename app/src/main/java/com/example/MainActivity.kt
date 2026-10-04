@@ -33,7 +33,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -60,17 +59,20 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -79,9 +81,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.AppDatabase
 import com.example.data.CalcStateRepository
-import com.example.ui.FileSizeVisualTransformation
 import com.example.ui.ThousandsSeparatorVisualTransformation
 import com.example.ui.theme.MyApplicationTheme
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -128,6 +130,60 @@ private val BlackButtonTextStyle = TextStyle(
   fontWeight = FontWeight.Bold,
   color = Color.Black
 )
+
+private val ContentCopyIcon: ImageVector by lazy {
+  ImageVector.Builder(
+    name = "ContentCopy",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f
+  ).apply {
+    path(fill = SolidColor(Color.Black)) {
+      moveTo(16f, 1f)
+      horizontalLineTo(4f)
+      curveTo(2.9f, 1f, 2f, 1.9f, 2f, 3f)
+      verticalLineTo(17f)
+      horizontalLineTo(4f)
+      verticalLineTo(3f)
+      horizontalLineTo(16f)
+      verticalLineTo(1f)
+      close()
+      moveTo(19f, 5f)
+      horizontalLineTo(8f)
+      curveTo(6.9f, 5f, 6f, 5.9f, 6f, 7f)
+      verticalLineTo(21f)
+      curveTo(6f, 22.1f, 6.9f, 23f, 8f, 23f)
+      horizontalLineTo(19f)
+      curveTo(20.1f, 23f, 21f, 22.1f, 21f, 21f)
+      verticalLineTo(7f)
+      curveTo(21f, 5.9f, 20.1f, 5f, 19f, 5f)
+      close()
+      moveTo(19f, 21f)
+      horizontalLineTo(8f)
+      verticalLineTo(7f)
+      horizontalLineTo(19f)
+      verticalLineTo(21f)
+      close()
+    }
+  }.build()
+}
+
+private fun Modifier.bottomUnderline(show: Boolean, color: Color): Modifier =
+  if (show) {
+    this.drawBehind {
+      val strokeWidth = 1.5.dp.toPx()
+      val y = size.height - strokeWidth / 2f
+      drawLine(
+        color = color,
+        start = Offset(0f, y),
+        end = Offset(size.width, y),
+        strokeWidth = strokeWidth
+      )
+    }
+  } else {
+    this
+  }
 
 @Composable
 fun DLCalcApp() {
@@ -389,7 +445,7 @@ fun DLCalcScreen(
             .testTag("copy_breakdown_button")
         ) {
           Icon(
-            imageVector = Icons.Default.ContentCopy,
+            imageVector = ContentCopyIcon,
             contentDescription = "Copy breakdown",
             tint = subtleIconTint,
             modifier = Modifier.size(16.dp)
@@ -427,20 +483,7 @@ fun DLCalcScreen(
             modifier = Modifier
               .width(110.dp)
               .height(32.dp)
-              .then(
-                if (showTimeUnderline) {
-                  Modifier.drawBehind {
-                    val strokeWidth = 1.5.dp.toPx()
-                    val y = size.height - strokeWidth / 2
-                    drawLine(
-                      color = underlineColor,
-                      start = Offset(0f, y),
-                      end = Offset(size.width, y),
-                      strokeWidth = strokeWidth
-                    )
-                  }
-                } else Modifier
-              ),
+              .bottomUnderline(showTimeUnderline, underlineColor),
             contentAlignment = Alignment.CenterEnd
           ) {
             if (uiState.calcMode == CalcMode.TIME) {
@@ -486,7 +529,7 @@ fun DLCalcScreen(
             .testTag("copy_seconds_button")
         ) {
           Icon(
-            imageVector = Icons.Default.ContentCopy,
+            imageVector = ContentCopyIcon,
             contentDescription = "Copy total seconds",
             tint = subtleIconTint,
             modifier = Modifier.size(16.dp)
@@ -499,21 +542,46 @@ fun DLCalcScreen(
       // 3. File size row: File size: _____ GB v   [ⓘ]
       // Standardized layout with matching slot widths for perfect vertical alignment of inputs, dropdowns, and [copy] column
       var isFileSizeFocused by remember { mutableStateOf(false) }
+      var forceEndSelectionOnFocusTap by remember { mutableStateOf(true) }
       var isFileSizeInfoExpanded by remember { mutableStateOf(false) }
       val fileSizeFocusRequester = remember { FocusRequester() }
       val fileSizeScrollState = rememberScrollState()
+      var fileSizeFieldValueState by remember {
+        mutableStateOf(
+          TextFieldValue(
+            text = uiState.fileSize,
+            selection = TextRange(uiState.fileSize.length)
+          )
+        )
+      }
+      val fileSizeFieldValue = if (fileSizeFieldValueState.text != uiState.fileSize) {
+        val len = uiState.fileSize.length
+        TextFieldValue(
+          text = uiState.fileSize,
+          selection = TextRange(
+            fileSizeFieldValueState.selection.start.coerceIn(0, len),
+            fileSizeFieldValueState.selection.end.coerceIn(0, len)
+          )
+        )
+      } else {
+        fileSizeFieldValueState
+      }
       val unfocusedFileSizeDisplay = remember(uiState.fileSize, isFileSizeFocused) {
-        if (!isFileSizeFocused && uiState.fileSize.contains('+')) {
+        if (!isFileSizeFocused && uiState.fileSize.indexOf('+') >= 0) {
           val suffix = DownloadCalculator.formatFileSizeResultSuffix(uiState.fileSize)
           if (suffix.isNotEmpty()) {
-            FileSizeVisualTransformation.Unfocused.filter(
-              AnnotatedString(uiState.fileSize)
-            ).text.text
+            ThousandsSeparatorVisualTransformation.formatText(uiState.fileSize) + suffix
           } else {
             ""
           }
         } else {
           ""
+        }
+      }
+      LaunchedEffect(isFileSizeFocused) {
+        if (isFileSizeFocused && forceEndSelectionOnFocusTap) {
+          delay(150L)
+          forceEndSelectionOnFocusTap = false
         }
       }
       LaunchedEffect(unfocusedFileSizeDisplay) {
@@ -550,20 +618,7 @@ fun DLCalcScreen(
             modifier = Modifier
               .width(90.dp)
               .height(40.dp)
-              .then(
-                if (showSizeUnderline) {
-                  Modifier.drawBehind {
-                    val strokeWidth = 1.5.dp.toPx()
-                    val y = size.height - strokeWidth / 2
-                    drawLine(
-                      color = underlineColor,
-                      start = Offset(0f, y),
-                      end = Offset(size.width, y),
-                      strokeWidth = strokeWidth
-                    )
-                  }
-                } else Modifier
-              )
+              .bottomUnderline(showSizeUnderline, underlineColor)
               .padding(horizontal = 4.dp, vertical = 4.dp),
             contentAlignment = Alignment.CenterEnd
           ) {
@@ -575,8 +630,42 @@ fun DLCalcScreen(
               )
             } else {
               BasicTextField(
-                value = uiState.fileSize,
-                onValueChange = onFileSizeChange,
+                value = fileSizeFieldValue,
+                onValueChange = { newValue ->
+                  if (uiState.fileSize != newValue.text) {
+                    forceEndSelectionOnFocusTap = false
+                    val sanitized = DLCalcViewModel.sanitizeFileSizeInput(newValue.text)
+                    if (sanitized != null) {
+                      onFileSizeChange(sanitized)
+                      val len = sanitized.length
+                      fileSizeFieldValueState = newValue.copy(
+                        text = sanitized,
+                        selection = TextRange(
+                          newValue.selection.start.coerceIn(0, len),
+                          newValue.selection.end.coerceIn(0, len)
+                        )
+                      )
+                    } else {
+                      val len = uiState.fileSize.length
+                      fileSizeFieldValueState = fileSizeFieldValueState.copy(
+                        text = uiState.fileSize,
+                        selection = TextRange(
+                          fileSizeFieldValueState.selection.start.coerceIn(0, len),
+                          fileSizeFieldValueState.selection.end.coerceIn(0, len)
+                        )
+                      )
+                    }
+                  } else if (!isFileSizeFocused || forceEndSelectionOnFocusTap) {
+                    // When tapping to focus from unfocused state, always place insertion point at the far right
+                    forceEndSelectionOnFocusTap = false
+                    fileSizeFieldValueState = newValue.copy(
+                      text = uiState.fileSize,
+                      selection = TextRange(uiState.fileSize.length)
+                    )
+                  } else {
+                    fileSizeFieldValueState = newValue
+                  }
+                },
                 singleLine = true,
                 visualTransformation = ThousandsSeparatorVisualTransformation,
                 textStyle = semiBoldEndTextStyle,
@@ -586,7 +675,18 @@ fun DLCalcScreen(
                   .fillMaxWidth()
                   .focusRequester(fileSizeFocusRequester)
                   .onFocusChanged { focusState ->
-                    isFileSizeFocused = focusState.isFocused
+                    val focused = focusState.isFocused
+                    if (focused != isFileSizeFocused) {
+                      isFileSizeFocused = focused
+                      if (!focused) {
+                        forceEndSelectionOnFocusTap = true
+                      }
+                      // Always reset insertion point to the far right (before =result) when focusing or unfocusing
+                      fileSizeFieldValueState = TextFieldValue(
+                        text = uiState.fileSize,
+                        selection = TextRange(uiState.fileSize.length)
+                      )
+                    }
                   }
                   .testTag("file_size_input")
               )
@@ -597,6 +697,11 @@ fun DLCalcScreen(
                     .background(backgroundColor)
                     .horizontalScroll(fileSizeScrollState)
                     .clickable(indication = null, interactionSource = null) {
+                      forceEndSelectionOnFocusTap = false
+                      fileSizeFieldValueState = TextFieldValue(
+                        text = uiState.fileSize,
+                        selection = TextRange(uiState.fileSize.length)
+                      )
                       fileSizeFocusRequester.requestFocus()
                     },
                   contentAlignment = Alignment.CenterEnd
@@ -725,20 +830,7 @@ fun DLCalcScreen(
             modifier = Modifier
               .width(90.dp)
               .height(40.dp)
-              .then(
-                if (showSpeedUnderline) {
-                  Modifier.drawBehind {
-                    val strokeWidth = 1.5.dp.toPx()
-                    val y = size.height - strokeWidth / 2
-                    drawLine(
-                      color = underlineColor,
-                      start = Offset(0f, y),
-                      end = Offset(size.width, y),
-                      strokeWidth = strokeWidth
-                    )
-                  }
-                } else Modifier
-              )
+              .bottomUnderline(showSpeedUnderline, underlineColor)
               .padding(horizontal = 4.dp, vertical = 4.dp),
             contentAlignment = Alignment.CenterEnd
           ) {
@@ -888,20 +980,7 @@ private fun TimeBreakdownRow(
       modifier = Modifier
         .width(80.dp)
         .height(28.dp)
-        .then(
-          if (showUnderline) {
-            Modifier.drawBehind {
-              val strokeWidth = 1.5.dp.toPx()
-              val y = size.height - strokeWidth / 2
-              drawLine(
-                color = underlineColor,
-                start = Offset(0f, y),
-                end = Offset(size.width, y),
-                strokeWidth = strokeWidth
-              )
-            }
-          } else Modifier
-        ),
+        .bottomUnderline(showUnderline, underlineColor),
       contentAlignment = Alignment.CenterEnd
     ) {
       if (isEditable) {

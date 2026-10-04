@@ -165,42 +165,29 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
     }
 
     fun onFileSizeChange(newSize: String) {
-        var clean = if (newSize.indexOf('=') >= 0) newSize.substringBefore('=') else newSize
-        if (clean.indexOf(',') >= 0) {
-            clean = clean.replace(",", "")
-        }
-        if (clean.indexOf(' ') >= 0) {
-            clean = clean.replace(" ", "")
-        }
-        while (clean.indexOf("++") >= 0) {
-            clean = clean.replace("++", "+")
-        }
-        if (clean.startsWith("+")) {
-            clean = clean.removePrefix("+")
-        }
+        val clean = sanitizeFileSizeInput(newSize) ?: return
         val current = _uiState.value
         if (clean == current.fileSize) return
-        val isValidExpr = clean.isEmpty() || clean.matches(FILE_SIZE_EXPR_REGEX)
-        if (isValidExpr) {
-            var newMode = current.calcMode
-            if (newMode == CalcMode.NONE && clean.isNotEmpty()) {
-                if (current.speed.isNotEmpty()) {
-                    newMode = CalcMode.TIME
-                } else if (hasAnyTimeInput(current)) {
-                    newMode = CalcMode.SPEED
-                }
+        var newMode = current.calcMode
+        if (newMode == CalcMode.NONE && clean.isNotEmpty()) {
+            if (current.speed.isNotEmpty()) {
+                newMode = CalcMode.TIME
+            } else if (hasAnyTimeInput(current)) {
+                newMode = CalcMode.SPEED
             }
-            val updated = current.copy(
-                fileSize = clean,
-                calcMode = newMode
-            )
-            _uiState.value = updated
-            persistCurrentState(updated)
         }
+        val updated = current.copy(
+            fileSize = clean,
+            calcMode = newMode
+        )
+        _uiState.value = updated
+        persistCurrentState(updated)
     }
 
     fun onFileSizeUnitChange(newUnit: FileSizeUnit) {
-        val updated = _uiState.value.copy(
+        val current = _uiState.value
+        if (current.fileSizeUnit == newUnit && !current.isFileSizeDropdownExpanded) return
+        val updated = current.copy(
             fileSizeUnit = newUnit,
             isFileSizeDropdownExpanded = false
         )
@@ -237,7 +224,9 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
     }
 
     fun onSpeedUnitChange(newUnit: SpeedUnit) {
-        val updated = _uiState.value.copy(
+        val current = _uiState.value
+        if (current.speedUnit == newUnit && !current.isSpeedDropdownExpanded) return
+        val updated = current.copy(
             speedUnit = newUnit,
             isSpeedDropdownExpanded = false
         )
@@ -469,6 +458,17 @@ class DLCalcViewModel(private val repository: CalcStateRepository) : ViewModel()
     }
 
     companion object {
+        fun sanitizeFileSizeInput(raw: String): String? {
+            var clean = if (raw.indexOf('=') >= 0) raw.substringBefore('=') else raw
+            if (clean.indexOf(',') >= 0) {
+                clean = clean.replace(",", "")
+            }
+            if (clean.indexOf(' ') >= 0) {
+                clean = clean.replace(" ", "")
+            }
+            return if (clean.isEmpty() || clean.matches(FILE_SIZE_EXPR_REGEX)) clean else null
+        }
+
         fun provideFactory(repository: CalcStateRepository): ViewModelProvider.Factory =
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")

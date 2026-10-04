@@ -96,7 +96,10 @@ data class DownloadTimeResult(
     }
 
     companion object {
-        val Empty = DownloadTimeResult(hasResult = false)
+        val Empty = DownloadTimeResult(hasResult = false, mode = CalcMode.TIME)
+        val EmptySpeed = DownloadTimeResult(hasResult = false, mode = CalcMode.SPEED)
+        val EmptySize = DownloadTimeResult(hasResult = false, mode = CalcMode.SIZE)
+        val EmptyNone = DownloadTimeResult(hasResult = false, mode = CalcMode.NONE)
     }
 }
 
@@ -286,11 +289,7 @@ object DownloadCalculator {
      */
     fun formatFileSizeResultSuffix(str: String): String {
         val len = str.length
-        val firstPlus = str.indexOf('+')
-        if (firstPlus <= 0 || firstPlus >= len - 1) {
-            // Quick check if there cannot possibly be at least 2 non-empty segments
-            if (firstPlus < 0) return ""
-        }
+        if (len < 3 || str.indexOf('+') < 0) return ""
         var sum = java.math.BigDecimal.ZERO
         var validPartCount = 0
         var start = 0
@@ -342,19 +341,18 @@ object DownloadCalculator {
         when (mode) {
             CalcMode.TIME -> {
                 if (fileSizeStr.isBlank() || cleanSpeedStr.isEmpty()) {
-                    return DownloadTimeResult(hasResult = false, mode = mode)
+                    return DownloadTimeResult.Empty
                 }
-                val size = evaluateFileSizeExpression(fileSizeStr) ?: return DownloadTimeResult(hasResult = false, mode = mode)
-                val speed = cleanSpeedStr.toDoubleOrNull() ?: return DownloadTimeResult(hasResult = false, mode = mode)
+                val size = evaluateFileSizeExpression(fileSizeStr) ?: return DownloadTimeResult.Empty
+                val speed = cleanSpeedStr.toDoubleOrNull() ?: return DownloadTimeResult.Empty
                 if (size <= 0.0 || speed <= 0.0 || size.isNaN() || speed.isNaN() || size.isInfinite() || speed.isInfinite()) {
-                    return DownloadTimeResult(hasResult = false, mode = mode)
+                    return DownloadTimeResult.Empty
                 }
                 val totalBytes = size * fileUnit.bytesMultiplier
                 val bytesPerSec = speed * speedUnit.bytesPerSecMultiplier
-                if (bytesPerSec <= 0.0) return DownloadTimeResult(hasResult = false, mode = mode)
+                if (bytesPerSec <= 0.0) return DownloadTimeResult.Empty
                 val totalSecondsExact = totalBytes / bytesPerSec
-                val timeResult = buildTimeBreakdown(totalSecondsExact)
-                return timeResult.copy(mode = mode)
+                return buildTimeBreakdown(totalSecondsExact)
             }
 
             CalcMode.SPEED -> {
@@ -362,16 +360,16 @@ object DownloadCalculator {
                 val timeBreakdown = if (timeSeconds != null && timeSeconds > 0.0) {
                     buildTimeBreakdown(timeSeconds)
                 } else {
-                    DownloadTimeResult(hasResult = false)
+                    DownloadTimeResult.EmptySpeed
                 }
 
                 if (fileSizeStr.isBlank() || cleanTimeStr.isEmpty()) {
-                    return timeBreakdown.copy(hasResult = false, mode = mode)
+                    return if (timeBreakdown.hasResult) timeBreakdown.copy(hasResult = false, mode = mode) else DownloadTimeResult.EmptySpeed
                 }
                 val size = evaluateFileSizeExpression(fileSizeStr)
-                    ?: return timeBreakdown.copy(hasResult = false, mode = mode)
+                    ?: return if (timeBreakdown.hasResult) timeBreakdown.copy(hasResult = false, mode = mode) else DownloadTimeResult.EmptySpeed
                 if (timeSeconds == null || size <= 0.0 || timeSeconds <= 0.0 || size.isNaN() || timeSeconds.isNaN() || size.isInfinite() || timeSeconds.isInfinite()) {
-                    return timeBreakdown.copy(hasResult = false, mode = mode)
+                    return if (timeBreakdown.hasResult) timeBreakdown.copy(hasResult = false, mode = mode) else DownloadTimeResult.EmptySpeed
                 }
 
                 val totalBytes = size * fileUnit.bytesMultiplier
@@ -392,16 +390,16 @@ object DownloadCalculator {
                 val timeBreakdown = if (timeSeconds != null && timeSeconds > 0.0) {
                     buildTimeBreakdown(timeSeconds)
                 } else {
-                    DownloadTimeResult(hasResult = false)
+                    DownloadTimeResult.EmptySize
                 }
 
                 if (cleanSpeedStr.isEmpty() || cleanTimeStr.isEmpty()) {
-                    return timeBreakdown.copy(hasResult = false, mode = mode)
+                    return if (timeBreakdown.hasResult) timeBreakdown.copy(hasResult = false, mode = mode) else DownloadTimeResult.EmptySize
                 }
                 val speed = cleanSpeedStr.toDoubleOrNull()
-                    ?: return timeBreakdown.copy(hasResult = false, mode = mode)
+                    ?: return if (timeBreakdown.hasResult) timeBreakdown.copy(hasResult = false, mode = mode) else DownloadTimeResult.EmptySize
                 if (timeSeconds == null || speed <= 0.0 || timeSeconds <= 0.0 || speed.isNaN() || timeSeconds.isNaN() || speed.isInfinite() || timeSeconds.isInfinite()) {
-                    return timeBreakdown.copy(hasResult = false, mode = mode)
+                    return if (timeBreakdown.hasResult) timeBreakdown.copy(hasResult = false, mode = mode) else DownloadTimeResult.EmptySize
                 }
 
                 val bytesPerSec = speed * speedUnit.bytesPerSecMultiplier
@@ -419,12 +417,11 @@ object DownloadCalculator {
 
             CalcMode.NONE -> {
                 val timeSeconds = cleanTimeStr.toDoubleOrNull()
-                val timeBreakdown = if (timeSeconds != null && timeSeconds > 0.0) {
-                    buildTimeBreakdown(timeSeconds)
+                return if (timeSeconds != null && timeSeconds > 0.0) {
+                    buildTimeBreakdown(timeSeconds).copy(hasResult = false, mode = mode)
                 } else {
-                    DownloadTimeResult(hasResult = false)
+                    DownloadTimeResult.EmptyNone
                 }
-                return timeBreakdown.copy(hasResult = false, mode = mode)
             }
         }
     }

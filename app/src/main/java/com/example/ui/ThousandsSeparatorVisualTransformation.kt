@@ -10,16 +10,14 @@ import androidx.compose.ui.text.input.VisualTransformation
  * while preserving precise bidirectional cursor offset mapping for seamless typing and editing.
  */
 object ThousandsSeparatorVisualTransformation : VisualTransformation {
-    override fun filter(text: AnnotatedString): TransformedText {
-        val originalText = text.text
+    /**
+     * Fast comma-formatting for display-only strings without allocating OffsetMapping arrays.
+     */
+    fun formatText(originalText: String): String {
         val origLen = originalText.length
-        // A thousands comma requires at least 4 digits in an integer run
-        if (origLen <= 3) {
-            return TransformedText(text, OffsetMapping.Identity)
-        }
+        if (origLen <= 3) return originalText
 
-        // Fast zero-allocation pass to check if any integer digit run exceeds 3 digits
-        var hasRunOverThree = false
+        var commaCount = 0
         var scanIdx = 0
         while (scanIdx < origLen) {
             val ch = originalText[scanIdx]
@@ -28,9 +26,9 @@ object ThousandsSeparatorVisualTransformation : VisualTransformation {
                 while (runEnd < origLen && originalText[runEnd].isDigit()) {
                     runEnd++
                 }
-                if (runEnd - scanIdx > 3) {
-                    hasRunOverThree = true
-                    break
+                val runLen = runEnd - scanIdx
+                if (runLen > 3) {
+                    commaCount += (runLen - 1) / 3
                 }
                 scanIdx = runEnd
             } else if (ch == '.') {
@@ -43,39 +41,74 @@ object ThousandsSeparatorVisualTransformation : VisualTransformation {
             }
         }
 
-        if (!hasRunOverThree) {
-            return TransformedText(text, OffsetMapping.Identity)
-        }
+        if (commaCount == 0) return originalText
 
-        val insertCommaAfter = BooleanArray(origLen)
-        var commaCount = 0
-
+        val sb = StringBuilder(origLen + commaCount)
         var i = 0
         while (i < origLen) {
-            if (originalText[i].isDigit() && (i == 0 || originalText[i - 1] != '.')) {
+            val ch = originalText[i]
+            if (ch.isDigit() && (i == 0 || originalText[i - 1] != '.')) {
                 var runEnd = i + 1
                 while (runEnd < origLen && originalText[runEnd].isDigit()) {
                     runEnd++
                 }
-                val runLen = runEnd - i
-                if (runLen > 3) {
-                    for (j in i until runEnd - 1) {
-                        val digitsRemaining = runEnd - 1 - j
-                        if (digitsRemaining > 0 && digitsRemaining % 3 == 0) {
-                            insertCommaAfter[j] = true
-                            commaCount++
-                        }
+                for (oIdx in i until runEnd) {
+                    sb.append(originalText[oIdx])
+                    if (oIdx < runEnd - 1 && (runEnd - 1 - oIdx) % 3 == 0) {
+                        sb.append(',')
                     }
                 }
                 i = runEnd
-            } else if (originalText[i] == '.') {
+            } else if (ch == '.') {
+                sb.append(ch)
                 i++
                 while (i < origLen && originalText[i].isDigit()) {
+                    sb.append(originalText[i])
                     i++
                 }
             } else {
+                sb.append(ch)
                 i++
             }
+        }
+        return sb.toString()
+    }
+
+    override fun filter(text: AnnotatedString): TransformedText {
+        val originalText = text.text
+        val origLen = originalText.length
+        // A thousands comma requires at least 4 digits in an integer run
+        if (origLen <= 3) {
+            return TransformedText(text, OffsetMapping.Identity)
+        }
+
+        // Fast zero-allocation pass to count total thousands commas needed
+        var commaCount = 0
+        var scanIdx = 0
+        while (scanIdx < origLen) {
+            val ch = originalText[scanIdx]
+            if (ch.isDigit() && (scanIdx == 0 || originalText[scanIdx - 1] != '.')) {
+                var runEnd = scanIdx + 1
+                while (runEnd < origLen && originalText[runEnd].isDigit()) {
+                    runEnd++
+                }
+                val runLen = runEnd - scanIdx
+                if (runLen > 3) {
+                    commaCount += (runLen - 1) / 3
+                }
+                scanIdx = runEnd
+            } else if (ch == '.') {
+                scanIdx++
+                while (scanIdx < origLen && originalText[scanIdx].isDigit()) {
+                    scanIdx++
+                }
+            } else {
+                scanIdx++
+            }
+        }
+
+        if (commaCount == 0) {
+            return TransformedText(text, OffsetMapping.Identity)
         }
 
         val transLen = origLen + commaCount
@@ -84,15 +117,45 @@ object ThousandsSeparatorVisualTransformation : VisualTransformation {
         val transToOrig = IntArray(transLen + 1)
 
         var tIdx = 0
-        for (oIdx in 0 until origLen) {
-            sb.append(originalText[oIdx])
-            origToTrans[oIdx] = tIdx
-            transToOrig[tIdx] = oIdx
-            tIdx++
-            if (insertCommaAfter[oIdx]) {
-                sb.append(',')
-                transToOrig[tIdx] = oIdx + 1
+        var i = 0
+        while (i < origLen) {
+            val ch = originalText[i]
+            if (ch.isDigit() && (i == 0 || originalText[i - 1] != '.')) {
+                var runEnd = i + 1
+                while (runEnd < origLen && originalText[runEnd].isDigit()) {
+                    runEnd++
+                }
+                for (oIdx in i until runEnd) {
+                    sb.append(originalText[oIdx])
+                    origToTrans[oIdx] = tIdx
+                    transToOrig[tIdx] = oIdx
+                    tIdx++
+                    if (oIdx < runEnd - 1 && (runEnd - 1 - oIdx) % 3 == 0) {
+                        sb.append(',')
+                        transToOrig[tIdx] = oIdx + 1
+                        tIdx++
+                    }
+                }
+                i = runEnd
+            } else if (ch == '.') {
+                sb.append(ch)
+                origToTrans[i] = tIdx
+                transToOrig[tIdx] = i
                 tIdx++
+                i++
+                while (i < origLen && originalText[i].isDigit()) {
+                    sb.append(originalText[i])
+                    origToTrans[i] = tIdx
+                    transToOrig[tIdx] = i
+                    tIdx++
+                    i++
+                }
+            } else {
+                sb.append(ch)
+                origToTrans[i] = tIdx
+                transToOrig[tIdx] = i
+                tIdx++
+                i++
             }
         }
         origToTrans[origLen] = transLen

@@ -244,6 +244,9 @@ class DownloadCalculatorTest {
         assertEquals("3.5", DownloadCalculator.resolveFileSizeString("1.2+2.3"))
         assertEquals("=15", DownloadCalculator.formatFileSizeResultSuffix("5+5+5"))
         assertEquals("=90", DownloadCalculator.formatFileSizeResultSuffix("50+40"))
+        assertEquals("=90", DownloadCalculator.formatFileSizeResultSuffix("40++50"))
+        assertEquals(90.0, DownloadCalculator.evaluateFileSizeExpression("40++50") ?: 0.0, 0.001)
+        assertEquals(40.0, DownloadCalculator.evaluateFileSizeExpression("+40") ?: 0.0, 0.001)
         assertEquals("", DownloadCalculator.formatFileSizeResultSuffix("50"))
         assertEquals("", DownloadCalculator.formatFileSizeResultSuffix("50+"))
     }

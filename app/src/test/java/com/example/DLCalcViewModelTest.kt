@@ -143,12 +143,12 @@ class DLCalcViewModelTest {
         assertEquals("50+40", viewModel.uiState.value.fileSize)
         assertEquals(CalcMode.TIME, viewModel.uiState.value.calcMode)
 
-        // Deleting first number ("+40") or middle number ("40++50") normalizes cleanly so numbers are always deletable
+        // Deleting first number ("+40") or middle number ("40++50") preserves '+' and '++' so user can replace the number
         viewModel.onFileSizeChange("+40")
-        assertEquals("40", viewModel.uiState.value.fileSize)
+        assertEquals("+40", viewModel.uiState.value.fileSize)
         viewModel.onFileSizeChange("40+10+50")
         viewModel.onFileSizeChange("40++50")
-        assertEquals("40+50", viewModel.uiState.value.fileSize)
+        assertEquals("40++50", viewModel.uiState.value.fileSize)
         viewModel.onFileSizeChange("")
         assertEquals("", viewModel.uiState.value.fileSize)
     }
